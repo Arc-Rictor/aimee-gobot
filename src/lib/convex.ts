@@ -241,8 +241,12 @@ function convexToMemoryItem(doc: any): MemoryItem {
 function convexToAsyncTask(doc: any): AsyncTask {
   return {
     id: doc._id,
-    created_at: new Date(doc.createdAt).toISOString(),
-    updated_at: new Date(doc.updatedAt).toISOString(),
+    created_at: doc.createdAt
+      ? new Date(doc.createdAt).toISOString()
+      : new Date().toISOString(),
+    updated_at: doc.updatedAt
+      ? new Date(doc.updatedAt).toISOString()
+      : new Date().toISOString(),
     chat_id: doc.chatId,
     original_prompt: doc.originalPrompt,
     status: doc.status,
