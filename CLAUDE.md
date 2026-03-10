@@ -475,6 +475,46 @@ Send and receive email via AgentMail SDK. The bot gets its own email address (e.
 
 ---
 
+## Phase 8.5: Scheduled Tasks & Reminders (Optional, ~5 min)
+
+Durable scheduling powered by Convex. Say "remind me at 5pm" or "check emails every morning at 9am" — tasks persist across restarts and fire even when machines are offline.
+
+**Requires:** Convex (Phase 2A). If you're using Supabase, scheduling is not yet available.
+
+### Setup
+```bash
+bun run setup:convex
+```
+This reuses your existing `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` from `.env` — no re-entry needed.
+
+### Task Types
+| Type | Behavior |
+|------|----------|
+| `reminder` | Send a Telegram notification at the scheduled time |
+| `action` | Notify + include the original prompt for execution |
+| `recurring` | Repeats: `daily`, `hourly`, `weekly`, `weekdays`, `every Xh`, `every Xm` |
+
+### Architecture
+- Convex `ctx.scheduler.runAt()` for durable scheduling
+- `convex/scheduledTasks.ts` — backend (create, list, cancel, fire, recurrence)
+- `src/lib/convex.ts` — client wrappers
+- `src/lib/anthropic-processor.ts` — 3 VPS tools (gated on `CONVEX_URL`)
+
+### Upgrade Path (Existing Users)
+```bash
+git pull origin master
+bun install
+bun run setup:convex    # if not using Convex yet
+npx convex dev --once   # if already using Convex (deploys new table)
+```
+
+Full docs: `docs/scheduling.md`
+
+### Tell me:
+"Set up scheduled tasks" or "Skip"
+
+---
+
 ## Phase 9: VPS Deployment (Optional, ~30 min)
 
 ### What This Does
@@ -634,6 +674,7 @@ convex/                  # Convex backend (primary database)
   nodeHeartbeat.ts       # Hybrid mode health tracking
   assets.ts              # File/image storage with Convex Storage
   knowledge.ts           # Structured knowledge base
+  scheduledTasks.ts      # Durable scheduled tasks (reminders, recurring)
   embeddings.ts          # OpenAI embedding generation (actions)
   embeddingPatches.ts    # Embedding repair functions
   callTranscripts.ts     # Voice call transcript storage
@@ -722,6 +763,7 @@ setup/
   test-convex.ts         # Convex connectivity test
   test-supabase.ts       # Supabase connectivity test
   setup-google-oauth.ts  # Google OAuth token setup (Gmail + Calendar)
+  configure-convex.ts    # Convex setup for scheduled tasks
   uninstall.ts           # Clean removal (cross-platform)
 launchd/
   templates/             # Plist templates for services (macOS)
@@ -729,6 +771,7 @@ logs/                    # Service log files
 docs/
   architecture.md        # Architecture deep dive
   faq.md                 # Frequently asked questions
+  scheduling.md          # Scheduled tasks & reminders docs
   troubleshooting.md     # Common issues and fixes
 ```
 

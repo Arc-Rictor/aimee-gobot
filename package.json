@@ -1,6 +1,6 @@
 {
   "name": "gobot",
-  "version": "2.5.3",
+  "version": "2.9.0",
   "description": "Always-on AI Telegram agent powered by Claude with multi-agent routing, proactive check-ins, and persistent memory",
   "type": "module",
   "scripts": {
@@ -23,6 +23,7 @@
     "test:telegram": "bun run setup/test-telegram.ts",
     "test:supabase": "bun run setup/test-supabase.ts",
     "test:convex": "bun run setup/test-convex.ts",
+    "setup:convex": "bun run setup/configure-convex.ts",
     "migrate:convex": "bun run scripts/migrate-to-convex.ts",
     "uninstall": "bun run setup/uninstall.ts",
     "upgrade": "bun run setup/upgrade.ts"

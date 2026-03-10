@@ -942,6 +942,120 @@ export async function getNodeStatus(
 }
 
 // ---------------------------------------------------------------------------
+// Scheduled Tasks
+// ---------------------------------------------------------------------------
+
+export interface ScheduledTask {
+  id: string;
+  created_at: string;
+  chat_id: string;
+  type: "reminder" | "action" | "recurring";
+  prompt: string;
+  scheduled_at: string;
+  status: "pending" | "fired" | "cancelled";
+  recurrence?: string;
+}
+
+function convexToScheduledTask(doc: any): ScheduledTask {
+  return {
+    id: doc._id,
+    created_at: doc.createdAt
+      ? new Date(doc.createdAt).toISOString()
+      : new Date().toISOString(),
+    chat_id: doc.chatId,
+    type: doc.type,
+    prompt: doc.prompt,
+    scheduled_at: doc.scheduledAt
+      ? new Date(doc.scheduledAt).toISOString()
+      : new Date().toISOString(),
+    status: doc.status,
+    recurrence: doc.recurrence,
+  };
+}
+
+/**
+ * Create a scheduled task. Returns the task ID.
+ */
+export async function createScheduledTask(
+  chatId: string,
+  type: "reminder" | "action" | "recurring",
+  prompt: string,
+  scheduledAt: number, // epoch ms
+  recurrence?: string
+): Promise<string | null> {
+  const backend = getBackend();
+
+  if (backend === "convex") {
+    const client = getConvex()!;
+    try {
+      const id = await client.mutation(anyApi.scheduledTasks.create, {
+        chatId,
+        type,
+        prompt,
+        scheduledAt,
+        recurrence,
+      });
+      return id;
+    } catch (err) {
+      console.error("createScheduledTask error:", err);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * List scheduled tasks for a chat.
+ */
+export async function listScheduledTasks(
+  chatId: string,
+  status?: "pending" | "fired" | "cancelled"
+): Promise<ScheduledTask[]> {
+  const backend = getBackend();
+
+  if (backend === "convex") {
+    const client = getConvex()!;
+    try {
+      const docs = await client.query(anyApi.scheduledTasks.list, {
+        chatId,
+        status,
+      });
+      return (docs || []).map(convexToScheduledTask);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Cancel a scheduled task by prompt text match.
+ */
+export async function cancelScheduledTask(
+  chatId: string,
+  searchText: string
+): Promise<boolean> {
+  const backend = getBackend();
+
+  if (backend === "convex") {
+    const client = getConvex()!;
+    try {
+      const result = await client.mutation(
+        anyApi.scheduledTasks.cancelBySearch,
+        { chatId, searchText }
+      );
+      return !!result;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Connection Test
 // ---------------------------------------------------------------------------
 

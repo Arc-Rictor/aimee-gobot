@@ -27,6 +27,51 @@ import {
 import type { Context } from "grammy";
 
 // ============================================================
+// TIME RESOLUTION — parse scheduled time strings to epoch ms
+// ============================================================
+
+function resolveScheduledTime(input: string): number | null {
+  if (!input) return null;
+
+  // Try ISO 8601 parse (e.g. "2026-03-10T17:00:00+01:00")
+  const isoDate = new Date(input);
+  if (!isNaN(isoDate.getTime())) return isoDate.getTime();
+
+  // Try relative patterns
+  const lower = input.trim().toLowerCase();
+  const now = new Date();
+
+  // "in X hours/minutes"
+  const relMatch = lower.match(
+    /^in\s+(\d+)\s*(h(?:ours?)?|m(?:in(?:ute)?s?)?)$/
+  );
+  if (relMatch) {
+    const val = parseInt(relMatch[1], 10);
+    const unit = relMatch[2].startsWith("h") ? 3600000 : 60000;
+    return now.getTime() + val * unit;
+  }
+
+  // "HH:MM" or "Hpm/am"
+  const timeMatch = lower.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
+    const meridiem = timeMatch[3];
+
+    if (meridiem === "pm" && hours < 12) hours += 12;
+    if (meridiem === "am" && hours === 12) hours = 0;
+
+    now.setHours(hours, minutes, 0, 0);
+    if (now.getTime() < Date.now()) {
+      now.setDate(now.getDate() + 1);
+    }
+    return now.getTime();
+  }
+
+  return null;
+}
+
+// ============================================================
 // ASK USER SIGNAL — thrown when Claude needs user input
 // ============================================================
 
@@ -129,6 +174,70 @@ function buildToolDefinitions(): Anthropic.Tool[] {
         required: ["question"],
       },
     },
+    {
+      name: "schedule_task",
+      description:
+        "Schedule a reminder, action, or recurring task. Use when the user says 'remind me', 'at 5pm', 'in 2 hours', 'later today', 'every morning', 'check emails tonight', etc. The task fires at the scheduled time via Telegram message.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          type: {
+            type: "string",
+            enum: ["reminder", "action", "recurring"],
+            description:
+              "reminder = just notify. action = notify with prompt to execute. recurring = repeats on schedule.",
+          },
+          prompt: {
+            type: "string",
+            description:
+              "What to remind about or what action to take. Be specific.",
+          },
+          scheduledTime: {
+            type: "string",
+            description:
+              "ISO 8601 datetime with timezone offset (e.g. '2026-03-10T17:00:00+01:00'). Compute from current time shown in system prompt. For relative times like 'in 2 hours', calculate the absolute time.",
+          },
+          recurrence: {
+            type: "string",
+            description:
+              "Only for type=recurring. Pattern: 'daily', 'hourly', 'weekdays', 'weekly', 'every 2h', 'every 30m'.",
+          },
+        },
+        required: ["type", "prompt", "scheduledTime"],
+      },
+    },
+    {
+      name: "list_scheduled_tasks",
+      description:
+        "List the user's scheduled tasks. Use when user asks 'what's scheduled?', 'show my reminders', 'upcoming tasks'.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          status: {
+            type: "string",
+            enum: ["pending", "fired", "cancelled"],
+            description: "Filter by status. Defaults to 'pending' (upcoming).",
+          },
+        },
+        required: [],
+      },
+    },
+    {
+      name: "cancel_scheduled_task",
+      description:
+        "Cancel a scheduled task by matching its description. Use when user says 'cancel the 5pm reminder', 'remove the email check', etc.",
+      input_schema: {
+        type: "object" as const,
+        properties: {
+          searchText: {
+            type: "string",
+            description:
+              "Text to match against task prompts. Partial match works (e.g. 'email' matches 'check emails').",
+          },
+        },
+        required: ["searchText"],
+      },
+    },
   ];
 
   // Only include tools that have their dependencies configured
@@ -138,6 +247,10 @@ function buildToolDefinitions(): Anthropic.Tool[] {
         return !!(
           process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID
         );
+      case "schedule_task":
+      case "list_scheduled_tasks":
+      case "cancel_scheduled_task":
+        return !!process.env.CONVEX_URL; // Requires Convex
       case "ask_user":
         return true; // Always available
       default:
@@ -181,6 +294,100 @@ async function executeTool(
           messages,
           assistantContent
         );
+      }
+
+      case "schedule_task": {
+        const scheduledMs = resolveScheduledTime(input.scheduledTime);
+        if (!scheduledMs) {
+          return JSON.stringify({
+            error: `Could not parse time: ${input.scheduledTime}`,
+          });
+        }
+
+        const chatId =
+          process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_CHAT_ID || "";
+        const taskId = await db.createScheduledTask(
+          chatId,
+          input.type,
+          input.prompt,
+          scheduledMs,
+          input.recurrence
+        );
+
+        if (!taskId) {
+          return JSON.stringify({ error: "Failed to create scheduled task" });
+        }
+
+        const scheduledDate = new Date(scheduledMs);
+        const tz = process.env.USER_TIMEZONE || "UTC";
+        const formatted = scheduledDate.toLocaleString("en-US", {
+          timeZone: tz,
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        });
+
+        return JSON.stringify({
+          success: true,
+          taskId,
+          type: input.type,
+          scheduledFor: formatted,
+          prompt: input.prompt,
+          recurrence: input.recurrence || null,
+        });
+      }
+
+      case "list_scheduled_tasks": {
+        const chatId =
+          process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_CHAT_ID || "";
+        const status = input.status || "pending";
+        const tasks = await db.listScheduledTasks(chatId, status);
+
+        if (tasks.length === 0) {
+          return JSON.stringify({
+            tasks: [],
+            message: `No ${status} scheduled tasks.`,
+          });
+        }
+
+        const tz = process.env.USER_TIMEZONE || "UTC";
+        const formatted = tasks.map((t, i) => ({
+          index: i + 1,
+          type: t.type,
+          prompt: t.prompt,
+          scheduledFor: new Date(t.scheduled_at).toLocaleString("en-US", {
+            timeZone: tz,
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          }),
+          recurrence: t.recurrence || null,
+          status: t.status,
+        }));
+
+        return JSON.stringify({ tasks: formatted });
+      }
+
+      case "cancel_scheduled_task": {
+        const chatId =
+          process.env.TELEGRAM_USER_ID || process.env.TELEGRAM_CHAT_ID || "";
+        const cancelled = await db.cancelScheduledTask(
+          chatId,
+          input.searchText
+        );
+
+        return JSON.stringify({
+          success: cancelled,
+          message: cancelled
+            ? `Cancelled task matching "${input.searchText}"`
+            : `No pending task found matching "${input.searchText}"`,
+        });
       }
 
       default:
@@ -254,6 +461,9 @@ Processing node: VPS (local machine may be offline)
 AVAILABLE TOOLS:
 - ask_user: Ask the user a question via inline buttons. Use BEFORE any irreversible action.
 ${process.env.ELEVENLABS_API_KEY ? "- phone_call: Initiate a voice call via ElevenLabs" : ""}
+${process.env.CONVEX_URL ? `- schedule_task: Schedule reminders, actions, or recurring tasks. Use for "remind me at 5pm", "check emails tonight", "every morning at 9am", etc. Compute absolute ISO 8601 datetime from current time.
+- list_scheduled_tasks: Show upcoming/pending scheduled tasks.
+- cancel_scheduled_task: Cancel a scheduled task by matching its description.` : ""}
 
 NOTE: External service integrations (Gmail, Calendar, Notion, etc.) are available
 on the local machine via MCP servers. When the local machine is offline, you can

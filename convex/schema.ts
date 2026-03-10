@@ -131,6 +131,32 @@ export default defineSchema({
       filterFields: ["fileType"],
     }),
 
+  // Scheduled tasks (reminders, deferred actions, recurring)
+  scheduledTasks: defineTable({
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    chatId: v.string(),
+    type: v.union(
+      v.literal("reminder"),
+      v.literal("action"),
+      v.literal("recurring")
+    ),
+    prompt: v.string(),
+    scheduledAt: v.number(), // epoch ms — when to fire
+    status: v.union(
+      v.literal("pending"),
+      v.literal("fired"),
+      v.literal("cancelled")
+    ),
+    recurrence: v.optional(v.string()), // e.g. "daily", "every 2h", "weekdays", "hourly"
+    convexScheduledId: v.optional(v.string()), // Convex scheduler ID for cancellation
+    result: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+  })
+    .index("by_status", ["status"])
+    .index("by_chatId", ["chatId"])
+    .index("by_chatId_status", ["chatId", "status"]),
+
   // Structured knowledge base
   knowledge: defineTable({
     createdAt: v.number(),

@@ -20,6 +20,7 @@ import type * as memory from "../memory.js";
 import type * as messages from "../messages.js";
 import type * as migrations from "../migrations.js";
 import type * as nodeHeartbeat from "../nodeHeartbeat.js";
+import type * as scheduledTasks from "../scheduledTasks.js";
 
 import type {
   ApiFromModules,
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   migrations: typeof migrations;
   nodeHeartbeat: typeof nodeHeartbeat;
+  scheduledTasks: typeof scheduledTasks;
 }>;
 
 /**

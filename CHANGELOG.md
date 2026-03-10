@@ -1,5 +1,41 @@
 # Gobot Changelog
 
+## v2.9.0 — 2026-03-10
+
+**Scheduled Tasks & Reminders via Convex**
+
+Durable scheduling powered by Convex's `ctx.scheduler.runAt()`. Users can say "remind me at 5pm", "check emails tonight", or "every morning at 9am" — tasks persist across restarts, survive server reboots, and fire even when machines are offline.
+
+### New Features
+- **3 new VPS tools**: `schedule_task`, `list_scheduled_tasks`, `cancel_scheduled_task` (gated on `CONVEX_URL`)
+- **3 task types**: `reminder` (notify), `action` (notify + prompt to execute), `recurring` (repeats)
+- **Recurrence patterns**: `daily`, `hourly`, `weekly`, `weekdays`, `every Xh`, `every Xm`
+- **Time parsing**: ISO 8601, relative ("in 2 hours"), clock time ("5pm", "17:30")
+- **Automated setup**: `bun run setup:convex` reuses existing Telegram credentials
+
+### New Files
+- `convex/scheduledTasks.ts` — Convex backend: create, list, cancel, fire (internal action), recurrence
+- `setup/configure-convex.ts` — Automated Convex setup (reuses `.env` credentials, creates test reminder)
+- `docs/scheduling.md` — Full documentation (setup, task types, architecture, troubleshooting)
+
+### Changed Files
+- `convex/schema.ts` — Added `scheduledTasks` table with status/chatId indexes
+- `src/lib/convex.ts` — Added `createScheduledTask()`, `listScheduledTasks()`, `cancelScheduledTask()`
+- `src/lib/anthropic-processor.ts` — Added scheduling tools + `resolveScheduledTime()` parser
+- `package.json` — Added `setup:convex` script
+
+### Upgrade Path (Existing Users)
+```bash
+git pull origin master
+bun install
+# If not using Convex yet:
+bun run setup:convex
+# If already using Convex:
+npx convex dev --once   # deploys new scheduledTasks table
+```
+
+---
+
 ## v2.8.0 — 2026-03-04
 
 **Convex Migration + Database Choice for Community Members**
