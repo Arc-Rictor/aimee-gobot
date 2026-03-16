@@ -11,6 +11,7 @@ import "./gmail";
 import "./calendar";
 import "./notion-tasks";
 import "./notion-calendar";
+import "./reflections";
 
 // Add your custom sources here:
 // import "./my-custom-source";

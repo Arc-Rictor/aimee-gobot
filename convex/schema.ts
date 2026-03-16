@@ -192,4 +192,22 @@ export default defineSchema({
       dimensions: 1536,
       filterFields: ["category"],
     }),
+
+  // Nightly reflection journal
+  reflections: defineTable({
+    createdAt: v.number(),
+    date: v.string(), // "YYYY-MM-DD" for dedup + lookup
+    content: v.string(),
+    themes: v.array(v.string()),
+    carryForward: v.string(),
+    inputSummary: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    embedding: v.optional(v.array(v.float64())),
+  })
+    .index("by_date", ["date"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+      filterFields: ["date"],
+    }),
 });

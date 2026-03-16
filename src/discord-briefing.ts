@@ -134,6 +134,29 @@ async function getStaleTasks(): Promise<string> {
   }
 }
 
+async function getReflectionCarryForward(): Promise<string> {
+  try {
+    const { getConvex } = await import("./lib/convex");
+    const { anyApi } = await import("convex/server");
+    const client = getConvex();
+    if (!client) return "";
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString("en-CA", { timeZone: USER_TIMEZONE });
+
+    const reflection = await client.query(anyApi.reflections.getByDate, {
+      date: yesterdayStr,
+    });
+
+    if (!reflection || !reflection.carryForward) return "";
+
+    return `🪞 **FROM YESTERDAY'S REFLECTION**\n${reflection.carryForward}`;
+  } catch {
+    return "";
+  }
+}
+
 function getProposal(): string | null {
   try {
     if (!existsSync(PROPOSALS_FILE)) return null;
@@ -175,11 +198,12 @@ async function buildBriefing(): Promise<string> {
   });
 
   // Gather all sections in parallel
-  const [goals, facts, email, stale] = await Promise.all([
+  const [goals, facts, email, stale, reflection] = await Promise.all([
     getGoalsSummary(),
     getFactsSummary(),
     getEmailSummary(),
     getStaleTasks(),
+    getReflectionCarryForward(),
   ]);
 
   const proposal = getProposal();
@@ -192,6 +216,7 @@ async function buildBriefing(): Promise<string> {
 
   if (email) briefing += `${email}\n\n`;
   if (stale) briefing += `${stale}\n\n`;
+  if (reflection) briefing += `${reflection}\n\n`;
   if (facts) briefing += `🧠 **Memory**: ${facts}\n\n`;
 
   // Include any pending proposal

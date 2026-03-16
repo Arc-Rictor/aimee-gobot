@@ -341,6 +341,7 @@ Each agent responds from its own perspective (Research provides data, Finance ru
 | **Heartbeat** | Every 30 min | `bun run heartbeat:discord` | Health check, duplicate bot detection, alerts |
 | **Morning Briefing** | 9am daily | `bun run briefing:discord` | Daily goals, calendar, email, news summary |
 | **Overnight Worker** | Every 2hrs (10pm-8am) | `bun run overnight` | Autonomous task processing using Claude CLI |
+| **Nightly Reflection** | 11pm daily | `bun run reflection:discord` | LLM-powered daily reflection journal, stored in Convex |
 | **Weekly Digest** | Monday 6am | `bun run digest` | Strategic digest emailed + posted to Discord |
 
 ### Discord Channels for Cron Services
@@ -675,6 +676,7 @@ convex/                  # Convex backend (primary database)
   assets.ts              # File/image storage with Convex Storage
   knowledge.ts           # Structured knowledge base
   scheduledTasks.ts      # Durable scheduled tasks (reminders, recurring)
+  reflections.ts         # Nightly reflection journal storage
   embeddings.ts          # OpenAI embedding generation (actions)
   embeddingPatches.ts    # Embedding repair functions
   callTranscripts.ts     # Voice call transcript storage
@@ -688,6 +690,7 @@ src/
   discord-heartbeat.ts   # Discord heartbeat/watchdog (cron, kills duplicates)
   discord-overnight.ts   # Autonomous overnight task runner (cron)
   discord-weekly-digest.ts # Weekly strategic digest (email + Discord, cron)
+  discord-reflection.ts  # Nightly reflection journal (cron)
   cli-chat.ts            # CLI chat interface
   bot.ts                 # Legacy Telegram relay daemon (local mode, polling)
   vps-gateway.ts         # VPS gateway (webhook mode, Anthropic API)
@@ -785,6 +788,7 @@ These are generated at runtime and should not be committed:
 | `discord-bot-health.json` | Bot health status for heartbeat checks |
 | `briefing-state.json` | Morning briefing delivery state |
 | `overnight-state.json` | Overnight task queue and progress |
+| `reflection-state.json` | Nightly reflection dedup state |
 | `session-state-discord.json` | Discord session persistence |
 | `session-state-cli.json` | CLI session persistence |
 
@@ -800,6 +804,7 @@ bun run heartbeat:discord          # Run heartbeat check
 bun run briefing:discord           # Run morning briefing
 bun run overnight                  # Run overnight worker
 bun run digest                     # Run weekly digest
+bun run reflection:discord         # Run nightly reflection
 
 # --- Legacy (Telegram) ---
 bun run start                      # Telegram polling mode

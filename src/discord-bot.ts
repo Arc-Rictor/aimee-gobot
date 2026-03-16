@@ -456,6 +456,7 @@ client.on("messageCreate", async (msg: DiscordMessage) => {
 \`memory\` / \`facts\` — List stored facts
 \`recall/search/find <q>\` — Search conversation history
 \`/agent <name>\` — Switch agent (general, research, content, finance, strategy, critic, cto, coo)
+\`/reflect\` — Run a reflection on today's conversations and thoughts
 \`/restart\` — Restart the bot remotely (deploys code changes)
 
 **Voice Messages:**
@@ -506,6 +507,28 @@ Otherwise, just type your message.`);
       await msg.reply(`Switched to **${config.name}** agent.`);
     } else {
       await msg.reply(`Unknown agent "${name}". Available: general, research, content, finance, strategy, critic, cto, coo`);
+    }
+    return;
+  }
+
+  // Reflect command — on-demand nightly reflection
+  if (text === "/reflect" || text === "!reflect") {
+    await msg.reply("🪞 Running reflection... gathering today's inputs and thinking it over.");
+    try { await msg.channel.sendTyping(); } catch {}
+    try {
+      const { gatherDayInputs, runReflection, storeReflection } = await import("./discord-reflection");
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: process.env.USER_TIMEZONE || "UTC" });
+      const inputs = await gatherDayInputs();
+      const inputSummary = `Messages: ${inputs.messages.length} chars, Goals: ${inputs.goals.length} chars, Facts: ${inputs.facts.length} chars, GobotBook: ${inputs.gobotbook}`;
+      const reflection = await runReflection(inputs);
+      await storeReflection(today, reflection, inputSummary);
+      const reply = `🪞 **Reflection — ${today}**\n\n${reflection.content}\n\n**Themes:** ${reflection.themes.join(", ") || "none"}\n\n**Carry forward:**\n${reflection.carryForward}`;
+      const chunks = splitMessage(reply);
+      for (const chunk of chunks) {
+        await msg.reply(chunk);
+      }
+    } catch (err) {
+      await msg.reply(`❌ Reflection failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     return;
   }

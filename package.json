@@ -14,6 +14,7 @@
     "heartbeat:discord": "bun run src/discord-heartbeat.ts",
     "briefing:discord": "bun run src/discord-briefing.ts",
     "overnight": "bun run src/discord-overnight.ts",
+    "reflection:discord": "bun run src/discord-reflection.ts",
     "digest": "bun run src/discord-weekly-digest.ts",
     "setup": "bun run setup/install.ts",
     "setup:launchd": "bun run setup/configure-launchd.ts",
