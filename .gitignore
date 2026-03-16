@@ -19,3 +19,8 @@ last-processed-call.json
 meeting-actions-state.json
 bun.lock
 gobot-master/
+discord-bot.pid
+discord-bot-health.json
+session-state-discord.json
+ecosystem.config.cjs
+.claude/
