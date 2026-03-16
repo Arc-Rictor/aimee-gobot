@@ -94,6 +94,23 @@ export function extractJSON(output: string, key: string): any | null {
 }
 
 /**
+ * Build a clean env for Claude subprocesses.
+ * Strips CLAUDECODE/CLAUDE_CODE_ENTRYPOINT to prevent "nested session" errors
+ * when spawned from within a Claude Code session or PM2 that inherited those vars.
+ */
+function cleanEnvForClaude(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  delete env.CLAUDECODE;
+  delete env.CLAUDE_CODE_ENTRYPOINT;
+  return {
+    ...env,
+    HOME: HOME_DIR,
+    PATH: process.env.PATH || "",
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+  };
+}
+
+/**
  * Spawn a Claude Code subprocess with proper timeout and cleanup.
  */
 export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> {
@@ -126,23 +143,25 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
     ? ["/usr/bin/caffeinate", "-i", CLAUDE_PATH, ...args]
     : [CLAUDE_PATH, ...args];
 
+  console.log(`[CLAUDE] Spawning subprocess (timeout: ${Math.round(timeoutMs / 1000)}s, resume: ${resumeSessionId || "none"})...`);
+  const startTime = Date.now();
+
   const proc = spawn({
     cmd,
     cwd: cwd || process.cwd(),
-    env: {
-      ...process.env,
-      HOME: HOME_DIR,
-      PATH: process.env.PATH || "",
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
-    },
+    env: cleanEnvForClaude(),
     stdout: "pipe",
     stderr: "pipe",
   });
+
+  // Capture stderr for diagnostics
+  const stderrPromise = new Response(proc.stderr).text().catch(() => "");
 
   // Timeout with proper process kill
   let timedOut = false;
   const timeoutId = setTimeout(() => {
     timedOut = true;
+    console.error(`[CLAUDE] Subprocess timed out after ${Math.round(timeoutMs / 1000)}s — killing`);
     try {
       proc.kill();
     } catch {}
@@ -151,13 +170,28 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
   try {
     const output = await new Response(proc.stdout).text();
     clearTimeout(timeoutId);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     if (timedOut) {
+      console.error(`[CLAUDE] Subprocess killed after timeout (${elapsed}s)`);
+      return { text: "", isError: true };
+    }
+
+    // Log stderr if present (auth errors, warnings, etc.)
+    const stderr = await stderrPromise;
+    if (stderr.trim()) {
+      console.error(`[CLAUDE] Subprocess stderr (${elapsed}s):\n${stderr.substring(0, 500)}`);
+    }
+
+    // Check for empty output
+    if (!output.trim()) {
+      console.error(`[CLAUDE] Subprocess returned empty output (${elapsed}s)`);
       return { text: "", isError: true };
     }
 
     // Check for errors
     if (isClaudeErrorResponse(output)) {
+      console.error(`[CLAUDE] Subprocess returned error response (${elapsed}s): ${output.substring(0, 200)}`);
       return { text: output, isError: true };
     }
 
@@ -165,19 +199,28 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
     if (outputFormat === "json") {
       try {
         const result = JSON.parse(output);
+        // Trust the is_error field from Claude's JSON output.
+        // Only fall back to pattern matching if is_error is not explicitly set.
+        const isErr = result.is_error === true ||
+          (result.is_error === undefined && isClaudeErrorResponse(result.result || ""));
+        console.log(`[CLAUDE] Subprocess completed (${elapsed}s, session: ${result.session_id || "none"}, error: ${isErr})`);
         return {
           text: result.result || output,
           sessionId: result.session_id,
-          isError: isClaudeErrorResponse(result.result || ""),
+          isError: isErr,
         };
       } catch {
+        console.error(`[CLAUDE] Failed to parse JSON output (${elapsed}s): ${output.substring(0, 200)}`);
         return { text: output, isError: isClaudeErrorResponse(output) };
       }
     }
 
+    console.log(`[CLAUDE] Subprocess completed (${elapsed}s)`);
     return { text: output.trim(), isError: false };
-  } catch {
+  } catch (err) {
     clearTimeout(timeoutId);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.error(`[CLAUDE] Subprocess exception (${elapsed}s):`, err);
     return { text: "", isError: true };
   }
 }
@@ -211,11 +254,7 @@ export async function runClaudeWithTimeout(
   const proc = spawn({
     cmd,
     cwd: options?.cwd || process.cwd(),
-    env: {
-      ...process.env,
-      HOME: HOME_DIR,
-      PATH: process.env.PATH || "",
-    },
+    env: cleanEnvForClaude(),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -306,12 +345,7 @@ export async function callClaudeStreaming(options: ClaudeStreamOptions): Promise
   const proc = spawn({
     cmd,
     cwd: cwd || process.cwd(),
-    env: {
-      ...process.env,
-      HOME: HOME_DIR,
-      PATH: process.env.PATH || "",
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
-    },
+    env: cleanEnvForClaude(),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -320,6 +354,7 @@ export async function callClaudeStreaming(options: ClaudeStreamOptions): Promise
   let timedOut = false;
   const timeoutId = setTimeout(() => {
     timedOut = true;
+    console.error(`[CLAUDE] Streaming subprocess timed out after ${Math.round(timeoutMs / 1000)}s — killing`);
     try { proc.kill(); } catch {}
   }, timeoutMs);
 

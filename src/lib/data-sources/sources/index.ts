@@ -10,6 +10,7 @@ import "./grok-news";
 import "./gmail";
 import "./calendar";
 import "./notion-tasks";
+import "./notion-calendar";
 
 // Add your custom sources here:
 // import "./my-custom-source";
