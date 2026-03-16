@@ -168,7 +168,7 @@ export async function runReflection(inputs: {
   facts: string;
   gobotbook: string;
 }): Promise<{ content: string; themes: string[]; carryForward: string }> {
-  const { createResilientMessage } = await import("./lib/resilient-client");
+  const { callClaude } = await import("./lib/claude");
 
   const prompt = `You are Aimee reflecting on your day. Review what happened, what you learned, what surprised you, what you're still thinking about. Note any connections between conversations that weren't obvious at the time. Flag anything you want to revisit tomorrow. Be honest, not performative. This is your private journal, not a post.
 
@@ -192,36 +192,60 @@ Produce a JSON object with exactly these fields:
 
 Respond with ONLY the JSON object, no markdown fences.`;
 
-  const response = await createResilientMessage({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [{ role: "user", content: prompt }],
+  const result = await callClaude({
+    prompt,
+    outputFormat: "text",
+    timeoutMs: 120_000,
+    cwd: PROJECT_ROOT,
+    maxTurns: "1",
   });
 
-  const text = response.content
-    .filter((b: any): b is { type: "text"; text: string } => b.type === "text")
-    .map((b: any) => b.text)
-    .join("")
-    .trim();
+  if (result.isError || !result.text) {
+    throw new Error("Claude subprocess failed or returned empty");
+  }
 
-  // Strip markdown fences if present
-  const cleaned = text.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "");
+  const raw = result.text;
 
-  try {
-    const parsed = JSON.parse(cleaned);
+  // Try multiple JSON extraction strategies
+  let parsed: any = null;
+
+  // 1. Try extractJSON helper (finds JSON object containing "content" key)
+  const { extractJSON } = await import("./lib/claude");
+  parsed = extractJSON(raw, "content");
+
+  // 2. Try stripping markdown fences and parsing directly
+  if (!parsed) {
+    const cleaned = raw.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {}
+  }
+
+  // 3. Try finding the first { ... } block in the output
+  if (!parsed) {
+    const match = raw.match(/\{[\s\S]*"content"[\s\S]*"carryForward"[\s\S]*\}/);
+    if (match) {
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {}
+    }
+  }
+
+  if (parsed && parsed.content) {
     return {
-      content: parsed.content || "Reflection failed to generate content.",
+      content: parsed.content,
       themes: Array.isArray(parsed.themes) ? parsed.themes : [],
       carryForward: parsed.carryForward || "No items to carry forward.",
     };
-  } catch (err) {
-    log(`JSON parse error: ${err}. Raw: ${cleaned.substring(0, 200)}`);
-    return {
-      content: cleaned,
-      themes: [],
-      carryForward: "Reflection generated but structured output failed.",
-    };
   }
+
+  // Final fallback: use raw text as content
+  log(`Could not extract JSON from reflection output. Raw (first 300 chars): ${raw.substring(0, 300)}`);
+  return {
+    content: raw.substring(0, 2000),
+    themes: [],
+    carryForward: "Reflection generated but structured output failed.",
+  };
 }
 
 // ---------------------------------------------------------------------------
