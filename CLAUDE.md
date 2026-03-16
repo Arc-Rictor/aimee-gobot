@@ -46,7 +46,7 @@ An always-on Discord agent that:
 - **Extensible via MCP**: Connect any MCP servers you use (email, calendar, project management, etc.)
 - **Human-in-the-loop**: Claude asks for confirmation via inline buttons before taking actions
 - Proactively checks in with smart context awareness
-- Sends morning briefings with pluggable data sources (goals, calendar, email, news, tasks)
+- Sends morning briefings with pluggable data sources (goals, Notion, news, tasks)
 - Sends weekly strategic digests (email + Discord)
 - Autonomous overnight task processing
 - Persists memory (facts, goals, conversation history) via Convex (Supabase fallback)
@@ -308,7 +308,7 @@ Agents can consult each other during conversations. For example, the General age
 
 ### Board Meetings (`/board`)
 
-The `/board` command triggers a multi-agent discussion. All configured agents weigh in on a topic sequentially, then a synthesis is generated. Useful for major decisions. Board meetings can pull live data from connected sources (Notion, GitHub, Google Sheets) via `src/lib/board-data.ts`.
+The `/board` command triggers a multi-agent discussion. All configured agents weigh in on a topic sequentially, then a synthesis is generated. Useful for major decisions. Board meetings can pull live data from connected sources (Notion, GitHub) via `src/lib/board-data.ts`.
 
 Example: `/board Should we launch a paid newsletter?`
 
@@ -339,7 +339,7 @@ Each agent responds from its own perspective (Research provides data, Finance ru
 | Service | Schedule | Command | Description |
 |---------|----------|---------|-------------|
 | **Heartbeat** | Every 30 min | `bun run heartbeat:discord` | Health check, duplicate bot detection, alerts |
-| **Morning Briefing** | 9am daily | `bun run briefing:discord` | Daily goals, calendar, email, news summary |
+| **Morning Briefing** | 9am daily | `bun run briefing:discord` | Daily goals, Notion tasks, news summary |
 | **Overnight Worker** | Every 2hrs (10pm-8am) | `bun run overnight` | Autonomous task processing using Claude CLI |
 | **Nightly Reflection** | 11pm daily | `bun run reflection:discord` | LLM-powered daily reflection journal, stored in Convex |
 | **Weekly Digest** | Monday 6am | `bun run digest` | Strategic digest emailed + posted to Discord |
@@ -375,20 +375,9 @@ Morning briefings pull live data from connected services. Each source auto-enabl
 |--------|----------------|---------------|
 | **Goals** | _(always on)_ | Active goals from database |
 | **AI News** | `XAI_API_KEY` | Top AI news via xAI Grok API |
-| **Gmail** | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` | Unread email count + top subjects |
-| **Calendar** | _(same Google OAuth)_ | Today's events with times |
 | **Notion Tasks** | `NOTION_TOKEN`, `NOTION_DATABASE_ID` | Due and overdue tasks |
 | **Notion Calendar** | `NOTION_TOKEN`, `NOTION_CALENDAR_DB_ID` | Today's calendar events from Notion |
 | **Reflections** | _(always on, requires Convex)_ | Yesterday's carryforward items from nightly reflection |
-
-### Google OAuth Setup (Gmail + Calendar)
-Run the interactive setup script:
-```bash
-bun run setup:google
-```
-This opens your browser, authorizes Gmail + Calendar read access, and saves the tokens to `.env`.
-
-**Prerequisites:** A Google Cloud project with Gmail API and Calendar API enabled. The script walks you through it.
 
 ### xAI Grok (AI News)
 1. Get an API key from [x.ai](https://x.ai)
@@ -533,7 +522,7 @@ Deploy the bot to a cloud VPS so it runs 24/7 without depending on your local ma
 
 The key insight: **Claude Code CLI works with an `ANTHROPIC_API_KEY` environment variable.** When set, it uses the Anthropic API (pay-per-token). Without it, Claude Code uses your subscription authentication. Both approaches are compliant — GoBot calls `claude -p` (Claude Code's official subprocess mode), not a third-party API client. You still get ALL Claude Code features:
 
-- **MCP servers** — whatever you've configured (email, calendar, databases, etc.)
+- **MCP servers** — whatever you've configured (email, Notion, databases, etc.)
 - **Skills** — Your custom Claude Code skills (presentations, research, etc.)
 - **Hooks** — Pre/post tool execution hooks
 - **CLAUDE.md** — Project instructions loaded automatically
@@ -634,7 +623,7 @@ to actually do things:
 Claude Code (brain)
   │
   ├── MCP Server: [email]      → read, send, reply to emails
-  ├── MCP Server: [calendar]   → check schedule, create events
+  ├── MCP Server: [notion]     → tasks, calendar, databases
   ├── MCP Server: [databases]  → query tasks, update records
   ├── MCP Server: Convex       → persistent memory, goals, facts
   ├── MCP Server: [your tools] → whatever MCP servers you connect
@@ -727,13 +716,13 @@ src/
     data-sources/        # Pluggable morning briefing data
       types.ts           # DataSource interface
       registry.ts        # Register, discover, fetch all
-      google-auth.ts     # Google OAuth token refresh
+      google-auth.ts     # Google OAuth token refresh (unused, from upstream)
       index.ts           # Module exports
       sources/           # Individual data sources
         goals.ts         # Active goals from database
         grok-news.ts     # AI news via xAI Grok
-        gmail.ts         # Unread emails
-        calendar.ts      # Today's events
+        gmail.ts         # Unread emails (unused, from upstream)
+        calendar.ts      # Google Calendar events (unused, from upstream)
         notion-tasks.ts  # Due/overdue tasks
         notion-calendar.ts # Notion calendar events
         reflections.ts   # Yesterday's reflection carryforward
@@ -770,7 +759,7 @@ setup/
   test-telegram.ts       # Telegram connectivity test (legacy)
   test-convex.ts         # Convex connectivity test
   test-supabase.ts       # Supabase connectivity test
-  setup-google-oauth.ts  # Google OAuth token setup (Gmail + Calendar)
+  setup-google-oauth.ts  # Google OAuth token setup (unused, from upstream)
   configure-convex.ts    # Convex setup for scheduled tasks
   uninstall.ts           # Clean removal (cross-platform)
 launchd/
@@ -823,7 +812,6 @@ bun run briefing                   # Telegram morning briefing
 # --- Setup & Testing ---
 bun run setup                      # Prerequisites checker
 bun run setup:verify               # Full health check
-bun run setup:google               # Google OAuth setup
 bun run setup:launchd              # macOS launchd services
 bun run setup:services             # PM2 + scheduler (Windows/Linux)
 bun run test:convex                # Test Convex connectivity
