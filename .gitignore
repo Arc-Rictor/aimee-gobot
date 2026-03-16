@@ -22,5 +22,9 @@ gobot-master/
 discord-bot.pid
 discord-bot-health.json
 session-state-discord.json
+briefing-state.json
+overnight-state.json
+reflection-state.json
+gobotbook-state.json
 ecosystem.config.cjs
 .claude/
