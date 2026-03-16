@@ -378,6 +378,8 @@ Morning briefings pull live data from connected services. Each source auto-enabl
 | **Gmail** | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` | Unread email count + top subjects |
 | **Calendar** | _(same Google OAuth)_ | Today's events with times |
 | **Notion Tasks** | `NOTION_TOKEN`, `NOTION_DATABASE_ID` | Due and overdue tasks |
+| **Notion Calendar** | `NOTION_TOKEN`, `NOTION_CALENDAR_DB_ID` | Today's calendar events from Notion |
+| **Reflections** | _(always on, requires Convex)_ | Yesterday's carryforward items from nightly reflection |
 
 ### Google OAuth Setup (Gmail + Calendar)
 Run the interactive setup script:
@@ -721,6 +723,7 @@ src/
     telegram.ts          # Telegram API helpers (legacy)
     voice.ts             # Gemini TTS + ElevenLabs calls + context
     transcribe.ts        # Gemini transcription (file + buffer)
+    gobotbook.ts         # GobotBook integration (comments + LLM summaries)
     data-sources/        # Pluggable morning briefing data
       types.ts           # DataSource interface
       registry.ts        # Register, discover, fetch all
@@ -732,6 +735,8 @@ src/
         gmail.ts         # Unread emails
         calendar.ts      # Today's events
         notion-tasks.ts  # Due/overdue tasks
+        notion-calendar.ts # Notion calendar events
+        reflections.ts   # Yesterday's reflection carryforward
         custom.example.ts # Template for custom sources
         index.ts         # Source registry
   agents/                # Multi-agent system
@@ -790,7 +795,10 @@ These are generated at runtime and should not be committed:
 | `overnight-state.json` | Overnight task queue and progress |
 | `reflection-state.json` | Nightly reflection dedup state |
 | `session-state-discord.json` | Discord session persistence |
-| `session-state-cli.json` | CLI session persistence |
+| `session-state.json` | CLI/legacy session persistence |
+| `checkin-state.json` | Smart check-in state |
+| `meeting-actions-state.json` | Board meeting actions state |
+| `gobotbook-state.json` | GobotBook state |
 
 ## Useful Commands
 
