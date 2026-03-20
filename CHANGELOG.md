@@ -1,5 +1,95 @@
 # Gobot Changelog
 
+## v2.10.0 — 2026-03-19
+
+**MCPManager — Model-Agnostic MCP Tool Access**
+
+When Claude is rate-limited and GoBot falls back to OpenRouter or Ollama, MCP tools (Notion, email, calendar, etc.) used to be lost — the fallback was plain text only. Now, MCPManager boots your MCP servers at startup and provides tools to **any** model, regardless of provider.
+
+### The Problem
+
+```
+BEFORE:
+  Claude rate limited → OpenRouter picks up → no tools → "I can't access your calendar"
+
+AFTER:
+  Claude rate limited → OpenRouter picks up → MCPManager provides tools → full access ✅
+```
+
+### How It Works
+
+MCPManager is a singleton that:
+1. **Discovers** your bun-based MCP servers from `config/mcp-servers.json` or `~/.claude.json`
+2. **Boots** them at startup via the MCP SDK Client (concurrent init, ~1s)
+3. **Converts** tool schemas to both Anthropic format (for direct API) and OpenAI format (for OpenRouter/Ollama)
+4. **Routes** tool calls to the correct MCP server when any model requests them
+5. **Falls back gracefully** — if a model doesn't support function calling, retries without tools automatically
+
+### New Features
+
+- **MCPManager** (`src/lib/mcp-client.ts`) — Boots MCP servers, discovers tools, converts schemas, routes calls. Singleton with proper lifecycle management (startup, shutdown, cleanup on exit).
+- **Fallback function calling** — `fallback-llm.ts` rewritten with an OpenAI-compatible tool calling loop. Models that support function calling (DeepSeek, Llama 3.1+, Qwen 2.5+, Mistral, GPT-4) get full MCP tool access.
+- **Auto-retry without tools** — If a model rejects tool definitions (older/smaller models), automatically retries the request without tools. No error to the user.
+- **VPS direct API gets MCP tools** — `anthropic-processor.ts` now merges MCP tools with existing hard-coded tools (phone_call, ask_user, scheduling). The direct API path goes from 5 tools to 5 + all your MCP tools.
+- **Dynamic system prompt** — VPS system prompt adapts based on whether MCP tools are available.
+
+### New Files
+
+- `src/lib/mcp-client.ts` — MCPManager class (config loading, server lifecycle, tool conversion, call routing)
+- `config/mcp-servers.example.json` — Template for custom MCP server config
+- `setup/test-mcp-client.ts` — MCPManager verification (server discovery, tool listing, test call)
+- `setup/test-fallback-with-tools.ts` — End-to-end fallback test (simulates rate limit → verifies tools work through OpenRouter)
+
+### Changed Files
+
+- `src/lib/fallback-llm.ts` — Rewritten: OpenAI-compatible function calling loop with MCP tools, system prompt, truncation, auto-retry without tools
+- `src/lib/anthropic-processor.ts` — Imports MCPManager, merges MCP tools into `buildToolDefinitions()`, routes MCP tool calls in `executeTool()`, dynamic system prompt
+- `src/vps-gateway.ts` — Imports MCPManager, `await mcpManager.init()` at startup, status in boot log
+- `package.json` — Added `@modelcontextprotocol/sdk` dependency
+- `CLAUDE.md` — Documented MCP tools feature in Phase 8, added `mcp-client.ts` to project structure
+
+### Config Priority
+
+MCPManager looks for server configs in this order:
+1. `config/mcp-servers.json` — GoBot-specific (create from `config/mcp-servers.example.json`)
+2. `MCP_CONFIG_PATH` env var — Custom path
+3. `~/.claude.json` — Auto-discovers bun-based servers from your Claude Code config
+
+Only bun-based servers are started. npx-based servers are skipped (zombie process risk).
+
+### Setup
+
+**Zero config needed** if you already have bun-based MCP servers in your Claude Code setup. MCPManager discovers them automatically.
+
+**Custom config:**
+```bash
+cp config/mcp-servers.example.json config/mcp-servers.json
+# Edit with your MCP server paths
+```
+
+**Verify:**
+```bash
+bun run setup/test-mcp-client.ts           # Test server discovery
+bun run setup/test-fallback-with-tools.ts   # Test full fallback flow
+```
+
+### Upgrade Path (Existing Users)
+
+```bash
+git pull origin master
+bun install   # installs @modelcontextprotocol/sdk
+```
+
+No other changes needed. MCPManager activates automatically on VPS mode if MCP servers are found.
+
+### Compatibility
+
+- Fully backward compatible. If no MCP servers are found, everything works exactly as before.
+- Local mode (bot.ts) is unaffected — Claude Code already handles MCP tools.
+- MCPManager only activates in VPS mode (`bun run vps`).
+
+---
+
 ## v2.9.0 — 2026-03-10
 
 **Scheduled Tasks & Reminders via Convex**

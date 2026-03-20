@@ -24,6 +24,7 @@ import {
   createResilientMessage,
   getModelForProvider,
 } from "./resilient-client";
+import { mcpManager } from "./mcp-client";
 import type { Context } from "grammy";
 
 // ============================================================
@@ -241,7 +242,7 @@ function buildToolDefinitions(): Anthropic.Tool[] {
   ];
 
   // Only include tools that have their dependencies configured
-  return tools.filter((tool) => {
+  const filtered = tools.filter((tool) => {
     switch (tool.name) {
       case "phone_call":
         return !!(
@@ -257,6 +258,13 @@ function buildToolDefinitions(): Anthropic.Tool[] {
         return true;
     }
   });
+
+  // Merge MCP tools if MCPManager is active
+  if (mcpManager.isReady && mcpManager.toolCount > 0) {
+    filtered.push(...mcpManager.getAnthropicTools());
+  }
+
+  return filtered;
 }
 
 // ============================================================
@@ -390,8 +398,14 @@ async function executeTool(
         });
       }
 
-      default:
+      default: {
+        // Route to MCPManager if it knows this tool
+        if (mcpManager.hasTool(name)) {
+          const result = await mcpManager.callTool(name, input);
+          return result.content;
+        }
         return JSON.stringify({ error: `Unknown tool: ${name}` });
+      }
     }
   } catch (err: any) {
     // Re-throw AskUserSignal — it's not an error
@@ -465,11 +479,15 @@ ${process.env.CONVEX_URL ? `- schedule_task: Schedule reminders, actions, or rec
 - list_scheduled_tasks: Show upcoming/pending scheduled tasks.
 - cancel_scheduled_task: Cancel a scheduled task by matching its description.` : ""}
 
-NOTE: External service integrations (Gmail, Calendar, Notion, etc.) are available
+${mcpManager.isReady && mcpManager.toolCount > 0
+    ? `MCP TOOLS AVAILABLE: ${mcpManager.toolCount} tools from connected MCP servers.
+You have direct access to external services (Notion, email, etc.) via MCP tools.
+Use them when the user asks to interact with these services.`
+    : `NOTE: External service integrations (Gmail, Calendar, Notion, etc.) are available
 on the local machine via MCP servers. When the local machine is offline, you can
 still have conversations, answer questions, and use your knowledge. For tasks that
 require external service access, let the user know you'll handle it when the local
-machine is back online, or use ask_user to confirm actions.
+machine is back online, or use ask_user to confirm actions.`}
 
 HUMAN-IN-THE-LOOP (CRITICAL):
 - Use ask_user tool BEFORE taking irreversible actions

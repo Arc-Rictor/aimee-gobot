@@ -52,6 +52,7 @@ import { BotRegistry } from "./lib/bot-registry";
 import { getAgentByTopicId, getAgentConfig } from "./agents";
 import { gatherBoardData } from "./lib/board-data";
 import { stripInvocationTags } from "./lib/cross-agent";
+import { mcpManager } from "./lib/mcp-client";
 
 // ============================================================
 // LOAD ENVIRONMENT
@@ -82,6 +83,14 @@ const PORT = parseInt(process.env.PORT || "3000");
 const DEPLOY_SECRET = process.env.DEPLOY_SECRET || "";
 const USER_NAME = process.env.USER_NAME || "User";
 const BOT_NAME = process.env.BOT_NAME || "Go";
+
+// ============================================================
+// MCP MANAGER — Model-agnostic tool access for all LLMs
+// ============================================================
+
+await mcpManager.init().catch((err: any) => {
+  console.error("[MCPManager] Init failed (continuing without MCP tools):", err.message);
+});
 
 // ============================================================
 // BOT SETUP
@@ -1452,6 +1461,7 @@ VPS Gateway started!
   Local health: ${process.env.MAC_HEALTH_URL || "(Supabase heartbeat only)"}
   Model routing: enabled (haiku/sonnet/opus)
   Agent SDK: ${useAgentSDK ? "enabled (sonnet/opus → full Claude Code)" : "disabled (direct API only)"}
+  MCP tools: ${mcpManager.isReady ? mcpManager.getStatus() : "disabled"}
   Daily budget: $${process.env.DAILY_API_BUDGET || "5.00"}
 `);
 

@@ -462,6 +462,17 @@ Send and receive email via AgentMail SDK. The bot gets its own email address (e.
 - Ollama: local fallback (`OLLAMA_MODEL`)
 - Resilient client auto-chains: Claude → OpenRouter → Ollama
 
+### MCP Tools for Fallback Models (Automatic)
+When Claude is rate-limited and GoBot falls to OpenRouter/Ollama, your MCP tools
+(Notion, email, calendar, etc.) now come along for the ride. MCPManager boots your
+bun-based MCP servers at startup and provides tools to **any** model in the right format.
+
+- **Zero setup if you already have MCP servers** — auto-discovers bun-based servers from `~/.claude.json`
+- **Custom config** — create `config/mcp-servers.json` (see `config/mcp-servers.example.json`)
+- **Model-agnostic** — works with DeepSeek, Llama, Qwen, Mistral, GPT-4, or any model that supports function calling
+- **Graceful fallback** — if a model doesn't support tools, retries without them automatically
+- **Test it:** `bun run setup/test-mcp-client.ts`
+
 ### Tell me:
 "Set up [integration name]" with your API keys, or "Skip integrations"
 
@@ -697,6 +708,7 @@ src/
     agent-session.ts     # Agent SDK processor (VPS mode, full Claude Code)
     model-router.ts      # Complexity classifier + tiered model selection
     resilient-client.ts  # Fallback LLM chain (Claude → OpenRouter → Ollama)
+    mcp-client.ts        # MCPManager — model-agnostic MCP tool access
     mac-health.ts        # Local machine health checking (hybrid mode)
     task-queue.ts        # Human-in-the-loop task management
     asset-store.ts       # Persistent image/file storage with AI descriptions
@@ -705,7 +717,7 @@ src/
     supabase.ts          # Supabase client (used as fallback)
     memory.ts            # Facts, goals, intents
     knowledge-base.ts    # Structured knowledge storage
-    fallback-llm.ts      # Backup LLM chain
+    fallback-llm.ts      # Backup LLM chain (with MCP tool support)
     capabilities.ts      # Agent capability definitions
     cross-agent.ts       # Inter-agent consultation
     bot-registry.ts      # Multi-bot token management
