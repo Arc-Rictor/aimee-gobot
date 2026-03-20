@@ -13,6 +13,7 @@ memory.json
 checkin-state.json
 config/profile.md
 config/schedule.json
+config/gobot-patterns.md
 config/.google-tokens.json
 news-history.json
 last-processed-call.json

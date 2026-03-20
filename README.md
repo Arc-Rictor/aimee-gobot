@@ -36,6 +36,12 @@ You ──▶ Telegram ──▶ Bot ─┤
 
 ## What's New
 
+### v2.11.0 — Feedback Loop (Adaptive Interaction Scoring)
+GoBot scores your interactions and generates patterns that feed back into the system prompt. Learns which areas it handles well and where it needs more care. Run `bun run feedback` daily or `bun run feedback --analyze` for weekly trends.
+
+### v2.10.0 — MCPManager (Model-Agnostic MCP Tools)
+When Claude is rate-limited and GoBot falls back to OpenRouter/Ollama, MCP tools now come along for the ride. MCPManager boots your MCP servers at startup and provides tools to any model.
+
 ### v2.8.0 — Convex Migration + Database Choice
 **Convex is now the primary database backend.** One-command setup, auto-managed TypeScript schema, built-in vector search and file storage. Supabase remains fully supported as a first-class alternative — choose whichever fits your workflow during Phase 2 setup. All "legacy" and "deprecation" language removed: both backends are equal citizens.
 

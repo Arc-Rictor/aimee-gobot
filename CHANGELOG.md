@@ -1,5 +1,49 @@
 # Gobot Changelog
 
+## v2.11.0 — 2026-03-20
+
+**Feedback Loop — Adaptive Interaction Scoring**
+
+GoBot now scores your interactions and generates patterns that feed back into the system prompt. Over time, it learns which areas it handles well and where it needs more care — making every session better than the last.
+
+### How It Works
+
+```
+Daily: score interactions → detect patterns → update gobot-patterns.md
+Weekly: analyze trends → generate summary → send to Telegram
+```
+
+The feedback loop auto-detects your setup:
+- **Convex** → reads messages + stores scores in Convex
+- **Claude Code** → parses JSONL from `~/.claude/history/` (local/hybrid users)
+- **Local** → reads from message history JSON + stores scores locally
+
+### New Features
+
+- **Interaction Scoring** — Each session scored 0-100 based on message count, tool usage, corrections, and appreciations. Labels: `excellent`, `good`, `fair`, `poor`.
+- **Pattern Generation** — `config/gobot-patterns.md` auto-generated with per-channel stats, focus area breakdowns, and actionable insights.
+- **Weekly Analysis** — `--analyze` flag generates a weekly summary with trends, best/weakest areas, and sends it to Telegram.
+- **Backfill** — `--backfill=N` scores the last N days in one go.
+- **Duplicate Prevention** — Checks if scores exist for a date before re-scoring (override with `--force`).
+
+### New Files
+
+- `src/feedback.ts` — CLI entry point (`bun run feedback`)
+- `src/lib/feedback-loop.ts` — Scoring engine, pattern generator, weekly analyzer
+- `convex/interactionScores.ts` — Convex mutations/queries (insertBatch, getByDateRange, existsForDate)
+- `config/gobot-patterns.md` — Auto-generated patterns file (gitignored output, template committed)
+
+### Usage
+
+```bash
+bun run feedback              # score today's interactions
+bun run feedback --backfill=5 # score last 5 days
+bun run feedback --analyze    # generate weekly patterns + send to Telegram
+bun run feedback --force      # re-score even if already done
+```
+
+---
+
 ## v2.10.0 — 2026-03-19
 
 **MCPManager — Model-Agnostic MCP Tool Access**
