@@ -7,7 +7,11 @@
  * Usage: bun run discord
  */
 
-import { Client, GatewayIntentBits, Message as DiscordMessage, Partials } from "discord.js";
+import {
+  Client, GatewayIntentBits, Message as DiscordMessage, Partials,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType,
+  type ButtonInteraction,
+} from "discord.js";
 import { join } from "path";
 import { readFile, writeFile } from "fs/promises";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
@@ -29,6 +33,7 @@ import { sendEmail, isEmailEnabled } from "./lib/email";
 import { addOvernightTask } from "./discord-overnight";
 import { transcribeAudioBuffer, isTranscriptionEnabled } from "./lib/transcribe";
 import { textToSpeech, isVoiceEnabled } from "./lib/voice";
+import { parseClaudeResponse } from "./lib/task-queue";
 import { writeFile, unlink } from "fs/promises";
 import { tmpdir } from "os";
 
@@ -111,6 +116,65 @@ async function saveSessionState(): Promise<void> {
 await loadSessionState();
 
 // ---------------------------------------------------------------------------
+// 2.5 Pending Approval State
+// ---------------------------------------------------------------------------
+
+interface PendingApproval {
+  question: string;
+  options: { label: string; value: string }[];
+  channelId: string;
+  messageId: string;        // The bot message with buttons
+  originalPrompt: string;   // What the user originally asked
+  chatId: string;
+  agent: string;
+  createdAt: number;
+}
+
+// Only one pending approval at a time (most recent wins)
+let pendingApproval: PendingApproval | null = null;
+
+/**
+ * Build Discord action rows with approval buttons.
+ * Discord allows max 5 buttons per row, max 5 rows.
+ */
+function buildApprovalButtons(
+  options: { label: string; value: string }[]
+): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  let currentRow = new ActionRowBuilder<ButtonBuilder>();
+  let count = 0;
+
+  for (const opt of options.slice(0, 9)) { // Max 9 option buttons + 1 cancel
+    if (count > 0 && count % 5 === 0) {
+      rows.push(currentRow);
+      currentRow = new ActionRowBuilder<ButtonBuilder>();
+    }
+    currentRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`approve:${opt.value}`)
+        .setLabel(opt.label.substring(0, 80))
+        .setStyle(opt.value === "yes" ? ButtonStyle.Success : ButtonStyle.Primary)
+    );
+    count++;
+  }
+
+  // Add cancel button
+  if (count % 5 === 0 && count > 0) {
+    rows.push(currentRow);
+    currentRow = new ActionRowBuilder<ButtonBuilder>();
+  }
+  currentRow.addComponents(
+    new ButtonBuilder()
+      .setCustomId("approve:cancel")
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Danger)
+  );
+  rows.push(currentRow);
+
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
 // 3. Claude Processing (same as cli-chat.ts)
 // ---------------------------------------------------------------------------
 
@@ -171,6 +235,7 @@ to #daily-briefing. Only use this for substantial tasks that benefit from autono
   let result = await callClaudeSubprocess({
     prompt: fullPrompt,
     outputFormat: "json",
+    permissionMode: "bypassPermissions",
     ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
     resumeSessionId: sessionId || undefined,
     timeoutMs: 180_000, // 3 minutes
@@ -185,6 +250,7 @@ to #daily-briefing. Only use this for substantial tasks that benefit from autono
     result = await callClaudeSubprocess({
       prompt: fullPrompt,
       outputFormat: "json",
+      permissionMode: "bypassPermissions",
       ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
       timeoutMs: 180_000,
       cwd: PROJECT_ROOT,
@@ -457,6 +523,9 @@ client.on("messageCreate", async (msg: DiscordMessage) => {
 \`recall/search/find <q>\` — Search conversation history
 \`/agent <name>\` — Switch agent (general, research, content, finance, strategy, critic, cto, coo)
 \`/reflect\` — Run a reflection on today's conversations and thoughts
+\`/approve\` — Approve a pending action (or click the button)
+\`/approve <n>\` — Approve option number n
+\`/deny\` — Deny/cancel a pending action
 \`/restart\` — Restart the bot remotely (deploys code changes)
 
 **Voice Messages:**
@@ -533,6 +602,22 @@ Otherwise, just type your message.`);
     return;
   }
 
+  // Approve command — text-based approval for pending actions
+  if (text === "/approve" || text === "!approve") {
+    await handleTextApproval(msg, chatId, "yes");
+    return;
+  }
+  if (text === "/deny" || text === "!deny") {
+    await handleTextApproval(msg, chatId, "cancel");
+    return;
+  }
+  // Numbered approval: /approve 2 selects option 2
+  const approveNumMatch = text.match(/^[/!]approve\s+(\d+)$/);
+  if (approveNumMatch) {
+    await handleTextApproval(msg, chatId, approveNumMatch[1]);
+    return;
+  }
+
   // Memory commands
   const memoryResult = await handleMemoryCommand(text, chatId);
   if (memoryResult !== null) {
@@ -605,12 +690,38 @@ Otherwise, just type your message.`);
       }
     }
 
-    // Sanitize and send response
+    // Check if Claude is asking for approval / user input
+    const parsed = parseClaudeResponse(response);
     const cleaned = sanitizeForDiscord(response);
     const chunks = splitMessage(cleaned);
 
-    for (const chunk of chunks) {
-      await msg.reply(chunk);
+    if (parsed.needsInput && parsed.options.length > 0) {
+      // Send the response text first (all chunks except maybe attach buttons to last)
+      for (let i = 0; i < chunks.length - 1; i++) {
+        await msg.reply(chunks[i]);
+      }
+      // Send last chunk with approval buttons
+      const rows = buildApprovalButtons(parsed.options);
+      const buttonMsg = await msg.reply({
+        content: chunks[chunks.length - 1],
+        components: rows,
+      });
+
+      pendingApproval = {
+        question: parsed.question || "",
+        options: parsed.options,
+        channelId: msg.channelId,
+        messageId: buttonMsg.id,
+        originalPrompt: text,
+        chatId,
+        agent: currentAgent,
+        createdAt: Date.now(),
+      };
+      console.log(`[DISCORD] Approval requested: "${parsed.question?.substring(0, 80)}"`);
+    } else {
+      for (const chunk of chunks) {
+        await msg.reply(chunk);
+      }
     }
 
     // If the user sent a voice message, also reply with a voice note
@@ -642,7 +753,190 @@ Otherwise, just type your message.`);
 });
 
 // ---------------------------------------------------------------------------
-// 6. Start
+// 6. Approval Handlers (HITL for Discord)
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle text-based approval (/approve, /deny, /approve 2)
+ */
+async function handleTextApproval(
+  msg: DiscordMessage,
+  chatId: string,
+  choice: string
+): Promise<void> {
+  if (!pendingApproval) {
+    await msg.reply("No pending approval right now.");
+    return;
+  }
+
+  await resolveApproval(msg, choice);
+}
+
+/**
+ * Resolve a pending approval — either from button click or text command.
+ * Sends the user's choice back to Claude as a follow-up message in the same session.
+ */
+async function resolveApproval(
+  replyTarget: DiscordMessage | ButtonInteraction,
+  choice: string
+): Promise<void> {
+  if (!pendingApproval) return;
+
+  const approval = pendingApproval;
+  pendingApproval = null; // Clear immediately to prevent double-resolve
+
+  // Disable buttons on the original message
+  try {
+    const channel = client.channels.cache.get(approval.channelId);
+    if (channel && "messages" in channel) {
+      const buttonMsg = await (channel as any).messages.fetch(approval.messageId);
+      if (buttonMsg?.editable) {
+        await buttonMsg.edit({ components: [] }); // Remove buttons
+      }
+    }
+  } catch { /* non-critical */ }
+
+  const isButtonInteraction = !("content" in replyTarget);
+
+  if (choice === "cancel") {
+    if (isButtonInteraction) {
+      await (replyTarget as ButtonInteraction).reply({ content: "Cancelled.", flags: 64 });
+    } else {
+      await (replyTarget as DiscordMessage).reply("Cancelled.");
+    }
+    return;
+  }
+
+  // Map choice back to option label for context
+  let choiceText = choice;
+  const option = approval.options.find((o) => o.value === choice);
+  if (option) choiceText = option.label;
+
+  // Acknowledge
+  const ackText = `Approved: **${choiceText}**. Processing...`;
+  if (isButtonInteraction) {
+    await (replyTarget as ButtonInteraction).reply(ackText);
+  } else {
+    await (replyTarget as DiscordMessage).reply(ackText);
+  }
+
+  // Show typing
+  try {
+    const channel = client.channels.cache.get(approval.channelId);
+    if (channel && "sendTyping" in channel) {
+      await (channel as any).sendTyping();
+    }
+  } catch {}
+
+  const typingInterval = setInterval(async () => {
+    try {
+      const channel = client.channels.cache.get(approval.channelId);
+      if (channel && "sendTyping" in channel) {
+        await (channel as any).sendTyping();
+      }
+    } catch {}
+  }, 8000);
+
+  try {
+    // Resume the Claude session with the user's approval
+    const followUp = `The user approved: "${choiceText}". Proceed with the action. Do not ask for confirmation again.`;
+
+    const response = await callClaude(followUp, approval.chatId, approval.agent);
+
+    await saveMessage({
+      chat_id: approval.chatId,
+      role: "user",
+      content: `[Approved: ${choiceText}]`,
+      metadata: { source: "discord", type: "approval" },
+    });
+    await saveMessage({
+      chat_id: approval.chatId,
+      role: "assistant",
+      content: response,
+      metadata: { agent: approval.agent, source: "discord" },
+    });
+
+    await processIntents(response);
+    await processCrossChannelMessages(client, response);
+
+    const cleaned = sanitizeForDiscord(response);
+    const chunks = splitMessage(cleaned);
+
+    // Check if the follow-up also needs approval
+    const parsed = parseClaudeResponse(response);
+    if (parsed.needsInput && parsed.options.length > 0) {
+      const channel = client.channels.cache.get(approval.channelId);
+      for (let i = 0; i < chunks.length - 1; i++) {
+        if (channel && "send" in channel) await (channel as any).send(chunks[i]);
+      }
+      const rows = buildApprovalButtons(parsed.options);
+      if (channel && "send" in channel) {
+        const newButtonMsg = await (channel as any).send({
+          content: chunks[chunks.length - 1],
+          components: rows,
+        });
+        pendingApproval = {
+          question: parsed.question || "",
+          options: parsed.options,
+          channelId: approval.channelId,
+          messageId: newButtonMsg.id,
+          originalPrompt: approval.originalPrompt,
+          chatId: approval.chatId,
+          agent: approval.agent,
+          createdAt: Date.now(),
+        };
+      }
+    } else {
+      for (const chunk of chunks) {
+        const channel = client.channels.cache.get(approval.channelId);
+        if (channel && "send" in channel) {
+          await (channel as any).send(chunk);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[DISCORD] Approval follow-up error:", err);
+    try {
+      const channel = client.channels.cache.get(approval.channelId);
+      if (channel && "send" in channel) {
+        await (channel as any).send("Sorry, I hit an error processing the approved action. Please try again.");
+      }
+    } catch {}
+  } finally {
+    clearInterval(typingInterval);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Button Interaction Handler
+// ---------------------------------------------------------------------------
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  const buttonInteraction = interaction as ButtonInteraction;
+  const customId = buttonInteraction.customId;
+
+  // Only handle our approval buttons
+  if (!customId.startsWith("approve:")) return;
+
+  // Check if the user is authorized
+  if (DISCORD_USER_ID && buttonInteraction.user.id !== DISCORD_USER_ID) {
+    await buttonInteraction.reply({
+      content: "Only the bot owner can approve actions.",
+      flags: 64, // ephemeral
+    });
+    return;
+  }
+
+  const choice = customId.replace("approve:", "");
+  console.log(`[DISCORD] Button approval: ${choice} by ${buttonInteraction.user.username}`);
+
+  await resolveApproval(buttonInteraction, choice);
+});
+
+// ---------------------------------------------------------------------------
+// 8. Start
 // ---------------------------------------------------------------------------
 
 console.log(`[DISCORD] Starting ${BOT_NAME}...`);

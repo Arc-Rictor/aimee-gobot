@@ -96,7 +96,7 @@ async function findChannelByName(name: string): Promise<string | null> {
 // Data Gathering
 // ---------------------------------------------------------------------------
 
-export async function gatherDayInputs(): Promise<{
+export async function gatherDayInputs(days?: number): Promise<{
   messages: string;
   goals: string;
   facts: string;
@@ -111,9 +111,17 @@ export async function gatherDayInputs(): Promise<{
   if (client) {
     try {
       const result = await client.query(anyApi.messages.getBoardMeetingContext, {
-        days: 1,
+        days: days ?? 1,
       });
-      if (result && typeof result === "string" && result.trim().length > 50) {
+      if (result && Array.isArray(result) && result.length > 0) {
+        messagesText = result
+          .map((m: any) => {
+            const role = m.role === "user" ? (m.metadata?.username || "User") : "Go";
+            return `[${role}] ${m.content}`;
+          })
+          .join("\n")
+          .substring(0, 3000);
+      } else if (result && typeof result === "string" && result.trim().length > 50) {
         messagesText = result.substring(0, 3000);
       }
     } catch (err) {
@@ -195,6 +203,7 @@ Respond with ONLY the JSON object, no markdown fences.`;
   const result = await callClaude({
     prompt,
     outputFormat: "text",
+    permissionMode: "bypassPermissions",
     timeoutMs: 120_000,
     cwd: PROJECT_ROOT,
     maxTurns: "1",

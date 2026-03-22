@@ -10,7 +10,7 @@
  * Usage: bun run heartbeat:discord
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, chmodSync, accessSync, statSync, constants as fsConstants } from "fs";
 import { join } from "path";
 import { loadEnv } from "./lib/env";
 
@@ -236,60 +236,191 @@ async function checkOutstandingWork(): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Cron Health Check — alert if scheduled jobs have gone silent
+// Cron Health Check — detect AND auto-repair cron infrastructure issues
 // ---------------------------------------------------------------------------
 
-async function checkCronHealth(): Promise<string[]> {
+/** Expected crontab entries — used to verify and restore if wiped */
+const EXPECTED_CRON_ENTRIES = [
+  { name: "Heartbeat", pattern: "heartbeat:discord", schedule: "*/30 * * * *", logFile: "heartbeat.log" },
+  { name: "Briefing", pattern: "briefing:discord", schedule: "0 9 * * *", logFile: "briefing.log" },
+  { name: "Overnight", pattern: "overnight", schedule: "0 22,0,2,4,6,8 * * *", logFile: "overnight.log" },
+  { name: "Digest", pattern: "digest", schedule: "0 6 * * 1", logFile: "digest.log" },
+  { name: "Reflection", pattern: "reflection:discord", schedule: "0 23 * * *", logFile: "reflection.log" },
+];
+
+/** Auto-repair cron-wrapper.sh if missing or not executable. Returns repair action taken or null. */
+async function repairCronWrapper(): Promise<string | null> {
+  const wrapperPath = join(PROJECT_ROOT, "scripts", "cron-wrapper.sh");
+  const scriptsDir = join(PROJECT_ROOT, "scripts");
+
+  if (!existsSync(wrapperPath)) {
+    log("[CronHealth] cron-wrapper.sh is MISSING — attempting auto-restore from git");
+    try {
+      // Ensure scripts/ directory exists
+      if (!existsSync(scriptsDir)) mkdirSync(scriptsDir, { recursive: true });
+
+      const result = Bun.spawnSync(
+        ["git", "checkout", "HEAD", "--", "scripts/cron-wrapper.sh"],
+        { cwd: PROJECT_ROOT, stdout: "pipe", stderr: "pipe" }
+      );
+      if (result.exitCode === 0 && existsSync(wrapperPath)) {
+        chmodSync(wrapperPath, 0o755);
+        log("[CronHealth] ✅ Restored cron-wrapper.sh from git and set executable");
+        return "restored cron-wrapper.sh from git";
+      } else {
+        log(`[CronHealth] git checkout failed: ${result.stderr.toString()}`);
+        return null;
+      }
+    } catch (err) {
+      log(`[CronHealth] Failed to restore cron-wrapper.sh: ${err}`);
+      return null;
+    }
+  }
+
+  // Exists — check executable permission
+  try {
+    accessSync(wrapperPath, fsConstants.X_OK);
+  } catch {
+    try {
+      chmodSync(wrapperPath, 0o755);
+      log("[CronHealth] ✅ Fixed cron-wrapper.sh permissions (was not executable)");
+      return "fixed cron-wrapper.sh permissions";
+    } catch (err) {
+      log(`[CronHealth] Failed to fix permissions: ${err}`);
+      return null;
+    }
+  }
+
+  return null; // No repair needed
+}
+
+/** Verify crontab entries exist and restore any that are missing. Returns list of repairs. */
+async function repairCrontab(): Promise<string[]> {
+  const repairs: string[] = [];
+
+  try {
+    const result = Bun.spawnSync(["crontab", "-l"], { stdout: "pipe", stderr: "pipe" });
+    const currentCrontab = result.exitCode === 0 ? result.stdout.toString() : "";
+
+    const missingEntries: typeof EXPECTED_CRON_ENTRIES = [];
+    for (const entry of EXPECTED_CRON_ENTRIES) {
+      if (!currentCrontab.includes(entry.pattern)) {
+        missingEntries.push(entry);
+        log(`[CronHealth] Missing crontab entry: ${entry.name} (${entry.pattern})`);
+      }
+    }
+
+    if (missingEntries.length === 0) return repairs;
+
+    // If ALL entries are missing, crontab was likely wiped — full restore
+    // If only some are missing, append the missing ones
+    const wrapperPath = join(PROJECT_ROOT, "scripts", "cron-wrapper.sh");
+    const logDir = join(PROJECT_ROOT, "logs");
+
+    let newEntries = "";
+    for (const entry of missingEntries) {
+      newEntries += `${entry.schedule} ${wrapperPath} ${entry.pattern} >> ${logDir}/${entry.logFile} 2>&1\n`;
+    }
+
+    // Append to existing crontab
+    const updatedCrontab = currentCrontab.trimEnd() + "\n" + newEntries;
+    const install = Bun.spawnSync(["crontab", "-"], {
+      stdin: new TextEncoder().encode(updatedCrontab),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    if (install.exitCode === 0) {
+      const names = missingEntries.map((e) => e.name).join(", ");
+      log(`[CronHealth] ✅ Restored ${missingEntries.length} crontab entries: ${names}`);
+      repairs.push(`restored crontab entries: ${names}`);
+    } else {
+      log(`[CronHealth] Failed to restore crontab: ${install.stderr.toString()}`);
+    }
+  } catch (err) {
+    log(`[CronHealth] Crontab check error: ${err}`);
+  }
+
+  return repairs;
+}
+
+/** Check each cron job's freshness using both state files and log timestamps. */
+function checkJobFreshness(): { alerts: string[]; details: string[] } {
   const alerts: string[] = [];
+  const details: string[] = [];
   const now = Date.now();
 
-  // Define expected cron jobs and their max staleness
   const cronJobs = [
-    { name: "Reflection", stateFile: "reflection-state.json", field: "lastReflectionDate", maxStaleHours: 36 },
-    { name: "Briefing", stateFile: "briefing-state.json", field: "lastBriefingDate", maxStaleHours: 36 },
+    { name: "Reflection", stateFile: "reflection-state.json", field: "lastReflectionDate", logFile: "reflection.log", maxStaleHours: 36 },
+    { name: "Briefing", stateFile: "briefing-state.json", field: "lastBriefingDate", logFile: "briefing.log", maxStaleHours: 36 },
+    { name: "Overnight", stateFile: null, field: null, logFile: "overnight.log", maxStaleHours: 36 },
   ];
 
   for (const job of cronJobs) {
     try {
-      const filePath = join(PROJECT_ROOT, job.stateFile);
-      if (!existsSync(filePath)) {
-        // Also check if the log file has recent entries
-        const logPath = join(LOGS_DIR, `${job.name.toLowerCase()}.log`);
-        if (existsSync(logPath)) {
-          const { mtimeMs } = await import("fs").then(fs => fs.statSync(logPath));
-          const staleMs = now - mtimeMs;
-          if (staleMs > job.maxStaleHours * 60 * 60 * 1000) {
-            alerts.push(`**⚠️ ${job.name}** hasn't run in ${Math.round(staleMs / 3600000)}h — check cron-wrapper.sh exists and is executable`);
+      let lastRunMs: number | null = null;
+      let lastRunLabel = "unknown";
+
+      // Try state file first (most accurate)
+      if (job.stateFile && job.field) {
+        const filePath = join(PROJECT_ROOT, job.stateFile);
+        if (existsSync(filePath)) {
+          const state = JSON.parse(readFileSync(filePath, "utf-8"));
+          const lastDate = state[job.field];
+          if (lastDate) {
+            lastRunMs = new Date(lastDate).getTime();
+            lastRunLabel = lastDate;
           }
         }
-        continue;
       }
 
-      const state = JSON.parse(readFileSync(filePath, "utf-8"));
-      const lastDate = state[job.field];
-      if (lastDate) {
-        const lastRun = new Date(lastDate).getTime();
-        const staleMs = now - lastRun;
-        if (staleMs > job.maxStaleHours * 60 * 60 * 1000) {
-          alerts.push(`**⚠️ ${job.name}** last ran ${Math.round(staleMs / 3600000)}h ago (${lastDate}) — check cron-wrapper.sh exists and is executable`);
+      // Fall back to log file mtime
+      if (!lastRunMs) {
+        const logPath = join(LOGS_DIR, job.logFile);
+        if (existsSync(logPath)) {
+          lastRunMs = statSync(logPath).mtimeMs;
+          lastRunLabel = new Date(lastRunMs).toISOString().split("T")[0];
         }
+      }
+
+      if (lastRunMs) {
+        const staleMs = now - lastRunMs;
+        const staleHours = Math.round(staleMs / 3600000);
+        if (staleMs > job.maxStaleHours * 60 * 60 * 1000) {
+          alerts.push(`**⚠️ ${job.name}** last ran ${staleHours}h ago (${lastRunLabel})`);
+        } else {
+          details.push(`${job.name}: OK (${lastRunLabel})`);
+        }
+      } else {
+        details.push(`${job.name}: no data`);
       }
     } catch (err) {
       log(`[CronHealth] Error checking ${job.name}: ${err}`);
     }
   }
 
-  // Check cron-wrapper.sh itself exists and is executable
-  const wrapperPath = join(PROJECT_ROOT, "scripts", "cron-wrapper.sh");
-  if (!existsSync(wrapperPath)) {
-    alerts.push("**🚨 cron-wrapper.sh is MISSING** — all scheduled jobs will fail. Restore it from git: `git checkout scripts/cron-wrapper.sh`");
-  } else {
-    try {
-      const { accessSync, constants } = await import("fs");
-      accessSync(wrapperPath, constants.X_OK);
-    } catch {
-      alerts.push("**⚠️ cron-wrapper.sh exists but is not executable** — run `chmod +x scripts/cron-wrapper.sh`");
-    }
+  return { alerts, details };
+}
+
+async function checkCronHealth(): Promise<string[]> {
+  const alerts: string[] = [];
+  const repairsPerformed: string[] = [];
+
+  // 1. Auto-repair cron-wrapper.sh (restore from git or fix permissions)
+  const wrapperRepair = await repairCronWrapper();
+  if (wrapperRepair) repairsPerformed.push(wrapperRepair);
+
+  // 2. Auto-repair crontab entries (restore if wiped)
+  const crontabRepairs = await repairCrontab();
+  repairsPerformed.push(...crontabRepairs);
+
+  // 3. Check job freshness (are they actually running?)
+  const { alerts: freshnessAlerts } = checkJobFreshness();
+  alerts.push(...freshnessAlerts);
+
+  // 4. Report repairs
+  if (repairsPerformed.length > 0) {
+    alerts.push(`**🔧 Auto-repaired:** ${repairsPerformed.join("; ")}`);
   }
 
   if (alerts.length > 0) {

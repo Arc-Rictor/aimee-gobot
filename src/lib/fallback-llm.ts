@@ -13,6 +13,8 @@
  */
 
 import { mcpManager, type OpenAITool } from "./mcp-client";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 
 const OPENROUTER_API_KEY = () => process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_MODEL = () =>
@@ -151,13 +153,43 @@ async function callWithToolLoop(
     hour12: false,
   });
 
-  const systemPrompt = `You are ${botName}, ${userName}'s AI assistant on Telegram.
+  // Load profile for personality context
+  let profileContext = "";
+  try {
+    const projectRoot = process.env.GO_PROJECT_ROOT || process.cwd();
+    const profilePath = join(projectRoot, "config", "profile.md");
+    if (existsSync(profilePath)) {
+      const raw = readFileSync(profilePath, "utf-8");
+      // Extract key sections, skip file permissions and quality check details
+      const lines = raw.split("\n");
+      const relevantSections: string[] = [];
+      let skip = false;
+      for (const line of lines) {
+        if (line.startsWith("## ") && /file permissions|quality check/i.test(line)) {
+          skip = true;
+          continue;
+        }
+        if (line.startsWith("## ") && skip) skip = false;
+        if (!skip) relevantSections.push(line);
+      }
+      profileContext = relevantSections.join("\n").substring(0, 2000);
+    }
+  } catch {}
+
+  const systemPrompt = `You are ${botName}, ${userName}'s AI assistant on Discord.
 Current time: ${localTime} (${userTimezone})
 Processing: Fallback mode (primary AI unavailable)
 
-${tools && tools.length > 0 ? `You have ${tools.length} tools available via MCP. Use them when the user asks to interact with external services (email, calendar, databases, etc.). Call tools as needed — you have full access.` : "You are in text-only mode. No external service access."}
+${profileContext ? `## Your profile and voice\n${profileContext}\n` : ""}## Key features you have
+- You keep a nightly reflection journal (stored in the database, runs at 11pm)
+- You track goals, facts, and memory for ${userName}
+- You run morning briefings and weekly digests
+- You have multiple specialist agents (Research, Finance, Strategy, Content, Critic, CTO, COO)
+- You are always-on and proactive
 
-Keep responses concise (Telegram-friendly). Be helpful with what you can do.`;
+${tools && tools.length > 0 ? `You have ${tools.length} tools available via MCP. Use them when the user asks to interact with external services (email, calendar, databases, etc.). Call tools as needed — you have full access.` : "You are in text-only mode with limited capabilities. You can still chat, but can't access external services right now."}
+
+Stay in character as ${botName}. Never say you're "just an AI" or that you don't have experiences. You have context, memory, and an ongoing relationship with ${userName}. Keep responses concise (Discord-friendly).`;
 
   const messages: any[] = [
     { role: "system", content: systemPrompt },

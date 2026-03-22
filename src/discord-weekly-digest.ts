@@ -104,6 +104,7 @@ async function runClaudeResearch(prompt: string): Promise<string> {
   const result = await callClaude({
     prompt,
     outputFormat: "json",
+    permissionMode: "bypassPermissions",
     allowedTools: ["WebSearch", "WebFetch", "Read"],
     timeoutMs: 600_000,
     cwd: PROJECT_ROOT,

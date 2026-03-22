@@ -78,6 +78,21 @@ export function parseClaudeResponse(output: string): ParsedResponse {
     "what do you think",
     "your preference",
     "your choice",
+    "needs your approval",
+    "need your approval",
+    "your permission",
+    "needs your permission",
+    "approve this",
+    "want me to proceed",
+    "want me to go ahead",
+    "want me to run",
+    "want me to execute",
+    "may i proceed",
+    "shall i proceed",
+    "shall i go ahead",
+    "shall i run",
+    "okay to proceed",
+    "ready to proceed",
   ];
   const lowerText = text.toLowerCase();
   const hasChoiceMarker = choiceMarkers.some((m) => lowerText.includes(m));
@@ -94,6 +109,11 @@ export function parseClaudeResponse(output: string): ParsedResponse {
       /shall i/i,
       /can i proceed/i,
       /go ahead/i,
+      /may i proceed/i,
+      /needs? your (approval|permission)/i,
+      /want me to (proceed|run|execute|go ahead)/i,
+      /okay to proceed/i,
+      /ready to proceed/i,
     ];
     const isYesNo = yesNoPatterns.some((p) => p.test(lastLine));
     if (isYesNo) {

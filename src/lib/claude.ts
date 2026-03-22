@@ -11,12 +11,14 @@ import { optionalEnv } from "./env";
 const IS_MACOS = process.platform === "darwin";
 const IS_WINDOWS = process.platform === "win32";
 const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "";
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || "";
 
 export interface ClaudeOptions {
   prompt: string;
   outputFormat?: "json" | "text";
   allowedTools?: string[];
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "auto";
   resumeSessionId?: string;
   timeoutMs?: number;
   cwd?: string;
@@ -102,11 +104,12 @@ function cleanEnvForClaude(): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
+  // Remove API key so Claude CLI uses subscription auth instead of pay-per-token
+  delete env.ANTHROPIC_API_KEY;
   return {
     ...env,
     HOME: HOME_DIR,
     PATH: process.env.PATH || "",
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
   };
 }
 
@@ -118,6 +121,7 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
     prompt,
     outputFormat = "text",
     allowedTools,
+    permissionMode,
     resumeSessionId,
     timeoutMs = 300_000, // 5 minutes default
     cwd,
@@ -125,6 +129,14 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
   } = options;
 
   const args = ["-p", prompt, "--output-format", outputFormat];
+
+  if (CLAUDE_MODEL) {
+    args.push("--model", CLAUDE_MODEL);
+  }
+
+  if (permissionMode) {
+    args.push("--permission-mode", permissionMode);
+  }
 
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowedTools", allowedTools.join(","));
@@ -316,6 +328,7 @@ export async function callClaudeStreaming(options: ClaudeStreamOptions): Promise
   const {
     prompt,
     allowedTools,
+    permissionMode,
     resumeSessionId,
     timeoutMs = 300_000,
     cwd,
@@ -325,6 +338,14 @@ export async function callClaudeStreaming(options: ClaudeStreamOptions): Promise
   } = options;
 
   const args = ["-p", prompt, "--output-format", "stream-json", "--verbose"];
+
+  if (CLAUDE_MODEL) {
+    args.push("--model", CLAUDE_MODEL);
+  }
+
+  if (permissionMode) {
+    args.push("--permission-mode", permissionMode);
+  }
 
   if (allowedTools && allowedTools.length > 0) {
     args.push("--allowedTools", allowedTools.join(","));

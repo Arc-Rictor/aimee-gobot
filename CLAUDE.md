@@ -338,7 +338,7 @@ Each agent responds from its own perspective (Research provides data, Finance ru
 
 | Service | Schedule | Command | Description |
 |---------|----------|---------|-------------|
-| **Heartbeat** | Every 30 min | `bun run heartbeat:discord` | Health check, duplicate bot detection, alerts |
+| **Heartbeat** | Every 30 min | `bun run heartbeat:discord` | Health check, duplicate bot detection, cron self-healing, alerts |
 | **Morning Briefing** | 9am daily | `bun run briefing:discord` | Daily goals, Notion tasks, news summary |
 | **Overnight Worker** | Every 2hrs (10pm-8am) | `bun run overnight` | Autonomous task processing using Claude CLI |
 | **Nightly Reflection** | 11pm daily | `bun run reflection:discord` | LLM-powered daily reflection journal, stored in Convex |
@@ -358,6 +358,10 @@ Each agent responds from its own perspective (Research provides data, Finance ru
 - Cron runs with minimal PATH — always set PATH at top of crontab
 - Discord cron scripts use Discord REST API (not the full client)
 - The overnight worker needs NVM path for `claude` CLI access
+- **Self-healing:** The heartbeat auto-repairs cron infrastructure every 30 min:
+  - Restores `cron-wrapper.sh` from git if missing, fixes permissions if not executable
+  - Detects and restores wiped crontab entries
+  - Checks job freshness via state files + log timestamps and alerts on staleness
 
 ### Tell me:
 "Set up scheduled services" or "Skip for now"
@@ -690,7 +694,7 @@ scripts/
 src/
   discord-bot.ts         # Discord bot (main service, PID-file guarded)
   discord-briefing.ts    # Discord morning briefing (cron)
-  discord-heartbeat.ts   # Discord heartbeat/watchdog (cron, kills duplicates)
+  discord-heartbeat.ts   # Discord heartbeat/watchdog (cron, kills duplicates, self-healing)
   discord-overnight.ts   # Autonomous overnight task runner (cron)
   discord-weekly-digest.ts # Weekly strategic digest (email + Discord, cron)
   discord-reflection.ts  # Nightly reflection journal (cron)
@@ -705,7 +709,7 @@ src/
     env.ts               # Environment loader
     discord.ts           # Discord REST API helpers, cross-channel messaging
     email.ts             # AgentMail SDK integration
-    claude.ts            # Claude Code subprocess (local mode) + streaming progress
+    claude.ts            # Claude Code subprocess (local mode) + streaming progress + permission modes
     anthropic-processor.ts  # Anthropic API processor (VPS mode, direct API)
     agent-session.ts     # Agent SDK processor (VPS mode, full Claude Code)
     model-router.ts      # Complexity classifier + tiered model selection
@@ -870,6 +874,7 @@ See `docs/troubleshooting.md` for common issues and fixes.
 - **Key lesson:** Never use Claude subprocesses to fetch data (email, calendar, etc.) from background scripts. Claude initializes all MCP servers on startup (60-180s). Use direct REST APIs instead -- see `docs/architecture.md`
 
 **Cron jobs not running:**
+- The heartbeat auto-repairs most cron issues (missing cron-wrapper.sh, wiped crontab entries)
 - Check crontab: `crontab -l`
 - Ensure PATH is set at top of crontab (Bun + Node/NVM paths)
 - Discord cron scripts use REST API — they don't need the full Discord client
