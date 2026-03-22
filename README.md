@@ -1,15 +1,15 @@
-# Gobot — Always-On AI Telegram Agent
+# Gobot — Always-On AI Discord Agent
 
-An always-on Telegram agent powered by Claude with multi-agent routing, proactive check-ins, persistent memory, voice calls, and morning briefings. Supports three deployment modes: local desktop, cloud VPS, or hybrid (recommended).
+An always-on Discord agent powered by Claude with multi-agent routing, proactive check-ins, persistent memory, voice calls, and morning briefings. Supports three deployment modes: local desktop, cloud VPS, or hybrid (recommended).
 
 **Created by [Goda Go](https://youtube.com/@GodaGo)** | [Autonomee Community](https://skool.com/autonomee)
 
 ## What It Does
 
 ```
-                          ┌── Local (Claude Code CLI + subscription)
-You ──▶ Telegram ──▶ Bot ─┤
-                          └── VPS  (Anthropic API + API key)
+                         ┌── Local (Claude Code CLI + subscription)
+You ──▶ Discord ──▶ Bot ─┤
+                         └── VPS  (Anthropic API + API key)
                                 │
                                 ├── Same code, same features everywhere:
                                 │   MCP Servers, Skills, Hooks, CLAUDE.md
@@ -17,16 +17,14 @@ You ──▶ Telegram ──▶ Bot ─┤
                                 └── Convex or Supabase (shared memory, goals, history)
 ```
 
-- **Relay**: Send messages on Telegram, get Claude responses back (and connect from Google Chat, Microsoft Teams, Discord, WhatsApp, Slack, and more)
-- **Multi-Agent**: Route messages to specialized agents via Telegram forum topics
-- **Multi-Bot Identities**: Each agent can have its own Telegram bot for visual separation
+- **Relay**: Send messages on Discord, get Claude responses back
+- **Multi-Agent**: Route messages to specialized agents (Research, Content, Finance, Strategy, Critic, CTO, COO)
 - **Board Meetings**: `/board` command triggers multi-agent discussion with synthesis
 - **Cross-Agent**: Agents consult each other mid-conversation automatically
 - **Memory**: Persistent facts, goals, and conversation history via Convex or Supabase (your choice)
 - **Image Storage**: Photos stored persistently with AI-generated descriptions, tags, and semantic search
 - **Smart Routing**: Messages auto-classified by complexity — Haiku (fast), Sonnet (medium), Opus (powerful)
-- **Streaming Progress**: Complex tasks show real-time tool usage and progress updates in Telegram
-- **Call-to-Task**: Phone calls auto-detect actionable tasks and execute them with live progress updates
+- **Streaming Progress**: Complex tasks show real-time tool usage and progress updates in Discord
 - **Proactive**: Smart check-ins that know when to reach out (and when not to)
 - **Briefings**: Daily morning summary with pluggable data sources (goals, calendar, email, news, tasks)
 - **Voice**: Text-to-speech replies, voice transcription, and phone calls
@@ -35,6 +33,9 @@ You ──▶ Telegram ──▶ Bot ─┤
 - **Auto-Deploy**: Push to GitHub, VPS pulls and restarts automatically
 
 ## What's New
+
+### v2.12.0 — Reliability & Performance Hardening
+Comprehensive diagnostic and fix pass: added missing Convex `interactionScores` schema, fixed infinite recursion in agent-session retry, added MCP tool call timeouts, atomic state file writes for overnight worker, `Promise.allSettled()` for parallel queries, cron timeout enforcement, configurable `OLLAMA_API_URL`, truncation indicators on tool results, improved Discord message splitting, smarter model routing for short messages, adaptive health check thresholds, bounded Convex queries, and intent tag length validation. Also installed missing `@modelcontextprotocol/sdk` dependency.
 
 ### v2.11.0 — Feedback Loop (Adaptive Interaction Scoring)
 GoBot scores your interactions and generates patterns that feed back into the system prompt. Learns which areas it handles well and where it needs more care. Run `bun run feedback` daily or `bun run feedback --analyze` for weekly trends.
@@ -54,7 +55,7 @@ When Claude is rate-limited and GoBot falls back to OpenRouter/Ollama, MCP tools
 Fallback to OpenRouter and Ollama now works on **all modes** (local, VPS, hybrid). Previously only local had fallback — VPS returned generic errors when Anthropic API failed. Also catches Claude Pro/Max subscription limits (was silently passing them through as responses).
 
 ### v2.6.0 — Multi-Bot Agent Identities + Board Meetings
-Each agent can now have its own Telegram bot — messages from Research, Finance, Content etc. appear from separate bot accounts. New `/board` command triggers a full multi-agent discussion on any topic. Agents can consult each other mid-conversation. All optional, fully backward compatible.
+Each agent can now have its own identity. New `/board` command triggers a full multi-agent discussion on any topic. Agents can consult each other mid-conversation. All optional, fully backward compatible.
 
 ### v2.5.3 — ZIP-to-Git Upgrade
 `bun run upgrade` connects ZIP downloads to the official repo. Future updates are just `git pull`.
@@ -85,7 +86,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full details.
 
 Claude Code CLI works with an `ANTHROPIC_API_KEY` environment variable. When set, it uses the Anthropic API (pay-per-token). Without it, Claude Code uses your subscription authentication. Both modes give you **all** Claude Code features: MCP servers, skills, hooks, CLAUDE.md, built-in tools.
 
-This means: clone the repo on your VPS, install Claude Code, set your API key, and run `bun run start`. Same experience as your laptop. One codebase everywhere.
+This means: clone the repo on your VPS, install Claude Code, set your API key, and run `bun run discord`. Same experience as your laptop. One codebase everywhere.
 
 ### Why Hybrid?
 
@@ -131,7 +132,7 @@ This connects your existing install to the official repo without touching your `
 
 Claude Code reads the `CLAUDE.md` file and walks you through a guided conversation to:
 
-1. Create a Telegram bot via BotFather
+1. Create a Discord bot via Developer Portal
 2. Choose and set up your database (Convex or Supabase)
 3. Personalize your profile and agents
 4. Customize agents + optional multi-bot identities and `/board` meetings
@@ -145,7 +146,7 @@ Claude Code reads the `CLAUDE.md` file and walks you through a guided conversati
 | Component | Technology |
 |-----------|-----------|
 | Runtime | [Bun](https://bun.sh) |
-| Telegram SDK | [grammY](https://grammy.dev) |
+| Discord SDK | [discord.js](https://discord.js.org) |
 | AI (Local) | [Claude Code](https://claude.ai/claude-code) CLI |
 | AI (VPS) | [Anthropic Messages API](https://docs.anthropic.com/en/api/messages) |
 | Database | [Convex](https://convex.dev) (recommended) or [Supabase](https://supabase.com) |
@@ -161,8 +162,8 @@ Claude Code reads the `CLAUDE.md` file and walks you through a guided conversati
 ### Local Mode
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
-│  Telegram    │────▶│  Gobot       │────▶│  Claude Code    │
-│  (grammY)   │◀────│  (polling)   │◀────│  CLI Subprocess │
+│  Discord     │────▶│  Gobot       │────▶│  Claude Code    │
+│ (discord.js)│◀────│  (gateway)   │◀────│  CLI Subprocess │
 └─────────────┘     └──────┬───────┘     └─────────────────┘
                            │
                     ┌──────┴───────┐
@@ -175,8 +176,8 @@ Claude Code reads the `CLAUDE.md` file and walks you through a guided conversati
 ### VPS Mode (same code as local)
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
-│  Telegram    │────▶│  Gobot       │────▶│  Claude Code CLI    │
-│  (grammY)   │◀────│  (polling)   │◀────│  + ANTHROPIC_API_KEY │
+│  Discord     │────▶│  Gobot       │────▶│  Claude Code CLI    │
+│ (discord.js)│◀────│  (gateway)   │◀────│  + ANTHROPIC_API_KEY │
 └─────────────┘     └──────┬───────┘     │                     │
                            │              │  ✅ MCP Servers      │
                     ┌──────┴───────┐     │  ✅ Skills           │
@@ -189,7 +190,7 @@ Claude Code reads the `CLAUDE.md` file and walks you through a guided conversati
 ### Hybrid Mode
 ```
 ┌───────────┐     ┌──────────────────────────────────────────┐
-│ Telegram  │     │  VPS (always on, Claude Code + API key)  │
+│  Discord  │     │  VPS (always on, Claude Code + API key)  │
 │           │────▶│                                           │
 │           │◀────│  Is local machine alive?                  │
 └───────────┘     │  ├── YES → forward to local (subscription)│
@@ -218,26 +219,25 @@ Also in this repo:
 ## Commands
 
 ```bash
-# Local mode
-bun run start              # Start bot (polling mode, uses Claude Code CLI)
+# Discord bot
+bun run discord            # Start Discord bot
+bun run chat               # CLI chat interface
 
-# VPS mode
-bun run vps                # Start VPS gateway (webhook mode, uses Anthropic API)
-
-# Background services
-bun run checkin            # Run smart check-in
-bun run briefing           # Run morning briefing
-bun run watchdog           # Run health check
+# Cron services
+bun run heartbeat:discord  # Run heartbeat check
+bun run briefing:discord   # Run morning briefing
+bun run overnight          # Run overnight worker
+bun run digest             # Run weekly digest
+bun run reflection:discord # Run nightly reflection
+bun run feedback           # Score interactions, generate patterns
 
 # Setup & testing
 bun run setup              # Install dependencies
 bun run setup:launchd      # Configure launchd services (macOS)
 bun run setup:services     # Configure services (Windows/Linux)
-bun run setup:google       # Set up Google OAuth (Gmail + Calendar)
 bun run setup:verify       # Full health check
-bun run test:telegram      # Test Telegram connectivity
-bun run test:supabase      # Test Supabase connectivity
 bun run test:convex        # Test Convex connectivity
+bun run test:supabase      # Test Supabase connectivity
 bun run uninstall          # Remove all services
 ```
 
@@ -260,4 +260,4 @@ MIT
 
 Built by [Goda Go](https://youtube.com/@GodaGo)
 
-<!-- Updated March 4, 2026: v2.8.0 — Convex migration + database choice. -->
+<!-- Updated March 22, 2026: v2.12.0 -->

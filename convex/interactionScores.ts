@@ -61,7 +61,7 @@ export const getByDateRange = query({
 export const getAll = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("interactionScores").collect();
+    return await ctx.db.query("interactionScores").take(1000);
   },
 });
 

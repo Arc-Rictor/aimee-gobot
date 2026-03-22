@@ -75,6 +75,12 @@ const COMPLEX_PATTERNS = [
  * tool usage or deep reasoning is clearly needed.
  */
 export function classifyComplexity(message: string): ModelTier {
+  // Short casual messages: skip straight to Haiku unless tools are needed
+  if (message.length < 100) {
+    const needsTools = TOOL_PATTERNS.some((p) => p.test(message));
+    if (!needsTools) return "haiku";
+  }
+
   // Check complex patterns first (Opus)
   for (const pattern of COMPLEX_PATTERNS) {
     if (pattern.test(message)) return "opus";

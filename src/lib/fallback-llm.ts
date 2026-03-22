@@ -18,6 +18,8 @@ const OPENROUTER_API_KEY = () => process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_MODEL = () =>
   process.env.OPENROUTER_MODEL || "moonshotai/kimi-k2.5";
 const OLLAMA_MODEL = () => process.env.OLLAMA_MODEL || "qwen3-coder";
+const OLLAMA_API_URL = () =>
+  process.env.OLLAMA_API_URL || "http://localhost:11434";
 const FALLBACK_OFFLINE_ONLY = () =>
   process.env.FALLBACK_OFFLINE_ONLY === "true";
 
@@ -95,7 +97,7 @@ export async function callFallbackLLMWithSource(
     );
 
     const text = await callWithToolLoop(
-      "http://localhost:11434/v1/chat/completions",
+      `${OLLAMA_API_URL()}/v1/chat/completions`,
       "", // No auth for Ollama
       OLLAMA_MODEL(),
       prompt,
@@ -252,7 +254,10 @@ Keep responses concise (Telegram-friendly). Be helpful with what you can do.`;
       messages.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: result.content.substring(0, 4000), // Truncate large results
+        content: (() => {
+          const truncated = result.content.length > 4000;
+          return result.content.substring(0, 4000) + (truncated ? "\n...[TRUNCATED]" : "");
+        })(), // Truncate large results
       });
     }
   }

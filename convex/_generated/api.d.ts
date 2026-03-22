@@ -14,6 +14,7 @@ import type * as callTranscripts from "../callTranscripts.js";
 import type * as embeddingPatches from "../embeddingPatches.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
+import type * as interactionScores from "../interactionScores.js";
 import type * as knowledge from "../knowledge.js";
 import type * as logs from "../logs.js";
 import type * as memory from "../memory.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   embeddingPatches: typeof embeddingPatches;
   embeddings: typeof embeddings;
   http: typeof http;
+  interactionScores: typeof interactionScores;
   knowledge: typeof knowledge;
   logs: typeof logs;
   memory: typeof memory;

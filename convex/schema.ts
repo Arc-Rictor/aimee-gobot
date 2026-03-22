@@ -193,6 +193,24 @@ export default defineSchema({
       filterFields: ["category"],
     }),
 
+  // Feedback loop interaction scores
+  interactionScores: defineTable({
+    date: v.string(),
+    channel: v.union(v.literal("claude-code"), v.literal("telegram")),
+    sessionId: v.string(),
+    score: v.number(),
+    label: v.string(),
+    durationMin: v.number(),
+    messageCount: v.number(),
+    toolCount: v.number(),
+    toolSuccessPct: v.number(),
+    correctionCount: v.number(),
+    appreciationCount: v.number(),
+    topSkills: v.string(),
+    sessionFocus: v.string(),
+    responseAvgSec: v.number(),
+  }).index("by_date", ["date"]),
+
   // Nightly reflection journal
   reflections: defineTable({
     createdAt: v.number(),

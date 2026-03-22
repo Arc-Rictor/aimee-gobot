@@ -165,7 +165,8 @@ export async function processWithAgentSDK(
   chatId: string,
   ctx: Context,
   resumeState?: AgentResumeState,
-  onCallInitiated?: (conversationId: string) => void
+  onCallInitiated?: (conversationId: string) => void,
+  retried: boolean = false
 ): Promise<string> {
   const startTime = Date.now();
 
@@ -440,10 +441,10 @@ export async function processWithAgentSDK(
     }
 
     // Not an AskUserSignal — check if credit error for OpenRouter retry
-    if (isCreditError(signal) && !useOpenRouter && process.env.OPENROUTER_API_KEY) {
+    if (isCreditError(signal) && !useOpenRouter && process.env.OPENROUTER_API_KEY && !retried) {
       markAnthropicDown();
       console.log("[Resilient] Agent SDK credit error — retrying via OpenRouter...");
-      return processWithAgentSDK(userMessage, chatId, ctx, resumeState, onCallInitiated);
+      return processWithAgentSDK(userMessage, chatId, ctx, resumeState, onCallInitiated, true);
     }
 
     // Try fallback LLMs before throwing

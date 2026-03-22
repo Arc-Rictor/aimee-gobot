@@ -91,12 +91,12 @@ export const search = query({
       entries = await ctx.db
         .query("knowledge")
         .withIndex("by_category", (q) => q.eq("category", args.category!))
-        .collect();
+        .take(500);
     } else {
       entries = await ctx.db
         .query("knowledge")
         .withIndex("by_status", (q) => q.eq("status", "active"))
-        .collect();
+        .take(500);
     }
 
     // Filter: active, not expired, not superseded, text match
@@ -137,12 +137,12 @@ export const getRecent = query({
       entries = await ctx.db
         .query("knowledge")
         .withIndex("by_category", (q) => q.eq("category", args.category!))
-        .collect();
+        .take(500);
     } else {
       entries = await ctx.db
         .query("knowledge")
         .withIndex("by_status", (q) => q.eq("status", "active"))
-        .collect();
+        .take(500);
     }
 
     // Filter: active, not expired, not superseded
@@ -176,7 +176,7 @@ export const getByProject = query({
     const entries = await ctx.db
       .query("knowledge")
       .withIndex("by_status", (q) => q.eq("status", "active"))
-      .collect();
+      .take(500);
 
     const matched = entries.filter((e) => {
       if (e.supersededBy) return false;
@@ -231,7 +231,7 @@ export const searchArchived = query({
     const entries = await ctx.db
       .query("knowledge")
       .withIndex("by_status", (q) => q.eq("status", "archived"))
-      .collect();
+      .take(500);
 
     const matched = entries.filter((e) => {
       const titleMatch = e.title.toLowerCase().includes(queryLower);
@@ -273,7 +273,7 @@ export const getContext = query({
       const recent = await ctx.db
         .query("knowledge")
         .withIndex("by_category", (q) => q.eq("category", cat))
-        .collect();
+        .take(500);
 
       const active = recent
         .filter(
@@ -310,7 +310,7 @@ export const getContext = query({
       const allActive = await ctx.db
         .query("knowledge")
         .withIndex("by_status", (q) => q.eq("status", "active"))
-        .collect();
+        .take(500);
 
       for (const word of words) {
         const wordLower = word.toLowerCase();

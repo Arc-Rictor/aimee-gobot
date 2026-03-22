@@ -198,10 +198,15 @@ class MCPManager {
         `[MCPManager] Calling ${serverName}/${toolName}(${JSON.stringify(args).substring(0, 200)})`
       );
 
-      const result = await server.client.callTool({
-        name: toolName,
-        arguments: args,
-      });
+      const result = await Promise.race([
+        server.client.callTool({
+          name: toolName,
+          arguments: args,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`MCP tool call timed out after 30s: ${toolName}`)), 30_000)
+        ),
+      ]);
 
       // Flatten content blocks to string
       const text =

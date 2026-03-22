@@ -1,5 +1,28 @@
 # Gobot Changelog
 
+## v2.12.0 — 2026-03-22
+
+**Reliability & Performance Hardening**
+
+Comprehensive diagnostic pass identifying and fixing 14 issues across error handling, process management, query performance, and configuration resilience.
+
+### Fixes
+
+- **Convex schema**: Added missing `interactionScores` table definition with `by_date` index — unblocks feedback loop scoring
+- **Infinite recursion guard**: `agent-session.ts` model retry no longer recurses infinitely when both Anthropic and OpenRouter fail
+- **MCP tool call timeout**: 30-second `Promise.race()` timeout prevents indefinite hangs on MCP server calls
+- **Cron timeout enforcement**: `cron-wrapper.sh` now enforces 15-minute hard timeout per script
+- **Atomic state writes**: Overnight worker uses write-to-tmp + rename pattern to prevent state corruption
+- **Promise.allSettled()**: Parallel database queries in `convex.ts` no longer fail entirely when one query errors
+- **Configurable Ollama URL**: New `OLLAMA_API_URL` env var (default `http://localhost:11434`) for VPS deployments
+- **Truncation indicators**: Tool results over 4000 chars now append `[TRUNCATED]` so models know data is incomplete
+- **Discord message splitting**: Boundary detection threshold raised from 30% to 50%, reducing mid-word splits
+- **Model routing**: Short messages (<100 chars) without tool patterns route directly to Haiku, reducing unnecessary cost escalation
+- **Health check thresholds**: Connected bots get 5-minute stale threshold (was 2min), preventing false kills during long Claude calls
+- **Bounded Convex queries**: Added `.take()` limits to 8 unbounded `.collect()` calls in knowledge and interactionScores
+- **Intent tag validation**: Goal text capped at 500 chars, fact text at 1000 chars to prevent oversized storage
+- **Missing dependency**: Installed `@modelcontextprotocol/sdk` which was referenced but not in package.json
+
 ## v2.11.0 — 2026-03-20
 
 **Feedback Loop — Adaptive Interaction Scoring**

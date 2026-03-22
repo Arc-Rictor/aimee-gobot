@@ -106,11 +106,13 @@ async function isBotHealthy(): Promise<{ alive: boolean; connected: boolean }> {
     if (!existsSync(healthFile)) return { alive: false, connected: false };
     const data = JSON.parse(readFileSync(healthFile, "utf-8"));
 
-    // Check if health file is stale (>2 minutes old = bot isn't updating it)
+    // Check if health file is stale — use longer threshold when bot reports
+    // connected (it could be in a long Claude call), shorter when disconnected
     const lastHeartbeat = new Date(data.lastHeartbeat || data.startedAt);
     const staleMs = Date.now() - lastHeartbeat.getTime();
-    if (staleMs > 2 * 60 * 1000) {
-      log(`Health file stale (${Math.round(staleMs / 1000)}s old) — bot is hung`);
+    const staleThresholdMs = data.connected === true ? 5 * 60 * 1000 : 2 * 60 * 1000;
+    if (staleMs > staleThresholdMs) {
+      log(`Health file stale (${Math.round(staleMs / 1000)}s old, threshold ${staleThresholdMs / 1000}s, connected=${data.connected}) — bot is hung`);
       return { alive: true, connected: false };
     }
 
@@ -234,6 +236,72 @@ async function checkOutstandingWork(): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Cron Health Check — alert if scheduled jobs have gone silent
+// ---------------------------------------------------------------------------
+
+async function checkCronHealth(): Promise<string[]> {
+  const alerts: string[] = [];
+  const now = Date.now();
+
+  // Define expected cron jobs and their max staleness
+  const cronJobs = [
+    { name: "Reflection", stateFile: "reflection-state.json", field: "lastReflectionDate", maxStaleHours: 36 },
+    { name: "Briefing", stateFile: "briefing-state.json", field: "lastBriefingDate", maxStaleHours: 36 },
+  ];
+
+  for (const job of cronJobs) {
+    try {
+      const filePath = join(PROJECT_ROOT, job.stateFile);
+      if (!existsSync(filePath)) {
+        // Also check if the log file has recent entries
+        const logPath = join(LOGS_DIR, `${job.name.toLowerCase()}.log`);
+        if (existsSync(logPath)) {
+          const { mtimeMs } = await import("fs").then(fs => fs.statSync(logPath));
+          const staleMs = now - mtimeMs;
+          if (staleMs > job.maxStaleHours * 60 * 60 * 1000) {
+            alerts.push(`**⚠️ ${job.name}** hasn't run in ${Math.round(staleMs / 3600000)}h — check cron-wrapper.sh exists and is executable`);
+          }
+        }
+        continue;
+      }
+
+      const state = JSON.parse(readFileSync(filePath, "utf-8"));
+      const lastDate = state[job.field];
+      if (lastDate) {
+        const lastRun = new Date(lastDate).getTime();
+        const staleMs = now - lastRun;
+        if (staleMs > job.maxStaleHours * 60 * 60 * 1000) {
+          alerts.push(`**⚠️ ${job.name}** last ran ${Math.round(staleMs / 3600000)}h ago (${lastDate}) — check cron-wrapper.sh exists and is executable`);
+        }
+      }
+    } catch (err) {
+      log(`[CronHealth] Error checking ${job.name}: ${err}`);
+    }
+  }
+
+  // Check cron-wrapper.sh itself exists and is executable
+  const wrapperPath = join(PROJECT_ROOT, "scripts", "cron-wrapper.sh");
+  if (!existsSync(wrapperPath)) {
+    alerts.push("**🚨 cron-wrapper.sh is MISSING** — all scheduled jobs will fail. Restore it from git: `git checkout scripts/cron-wrapper.sh`");
+  } else {
+    try {
+      const { accessSync, constants } = await import("fs");
+      accessSync(wrapperPath, constants.X_OK);
+    } catch {
+      alerts.push("**⚠️ cron-wrapper.sh exists but is not executable** — run `chmod +x scripts/cron-wrapper.sh`");
+    }
+  }
+
+  if (alerts.length > 0) {
+    log(`[CronHealth] ${alerts.length} issue(s) detected`);
+  } else {
+    log("[CronHealth] All cron jobs healthy");
+  }
+
+  return alerts;
+}
+
+// ---------------------------------------------------------------------------
 // GobotBook Social Check
 // ---------------------------------------------------------------------------
 
@@ -349,7 +417,10 @@ async function heartbeat() {
   // 3. GobotBook social check
   const gobotBookAlerts = await checkGobotBook();
 
-  // 4. Post to #alerts if there's anything to report
+  // 4. Cron health check — detect if scheduled jobs have gone silent
+  const cronAlerts = await checkCronHealth();
+
+  // 5. Post to #alerts if there's anything to report
   const alertsChannelId = await findAlertsChannel();
   if (alertsChannelId) {
     const messages: string[] = [];
@@ -360,6 +431,10 @@ async function heartbeat() {
 
     if (workAlerts.length > 0) {
       messages.push(...workAlerts);
+    }
+
+    if (cronAlerts.length > 0) {
+      messages.push(...cronAlerts);
     }
 
     // GobotBook alerts go to dedicated channel if configured, otherwise #alerts

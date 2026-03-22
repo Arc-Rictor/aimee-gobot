@@ -306,7 +306,7 @@ export async function processIntents(
   let match: RegExpExecArray | null;
 
   while ((match = goalWithDeadline.exec(text)) !== null) {
-    const goalText = match[1].trim();
+    const goalText = match[1].trim().substring(0, 500);
     const deadline = match[2].trim();
     const success = await addGoal(goalText, deadline);
     if (success) result.goalsAdded.push(goalText);
@@ -315,7 +315,7 @@ export async function processIntents(
   // [GOAL: description] (without deadline, avoid re-matching the above)
   const goalSimple = /\[GOAL:\s*([^\]|]+?)\s*\]/gi;
   while ((match = goalSimple.exec(text)) !== null) {
-    const goalText = match[1].trim();
+    const goalText = match[1].trim().substring(0, 500);
     // Skip if already added via the deadline pattern
     if (result.goalsAdded.includes(goalText)) continue;
     const success = await addGoal(goalText);
@@ -338,7 +338,7 @@ export async function processIntents(
   // [REMEMBER: text]
   const rememberPattern = /\[REMEMBER:\s*([^\]]+?)\s*\]/gi;
   while ((match = rememberPattern.exec(text)) !== null) {
-    const factText = match[1].trim();
+    const factText = match[1].trim().substring(0, 1000);
     const success = await addFact(factText);
     if (success) result.factsAdded.push(factText);
   }
@@ -346,7 +346,7 @@ export async function processIntents(
   // [FORGET: text]
   const forgetPattern = /\[FORGET:\s*([^\]]+?)\s*\]/gi;
   while ((match = forgetPattern.exec(text)) !== null) {
-    const forgetText = match[1].trim();
+    const forgetText = match[1].trim().substring(0, 1000);
     const success = await deleteFact(forgetText);
     if (success) result.factsRemoved.push(forgetText);
   }

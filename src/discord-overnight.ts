@@ -17,7 +17,7 @@
  * Usage: bun run overnight
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { join } from "path";
 import { loadEnv } from "./lib/env";
 
@@ -124,7 +124,9 @@ function loadTasks(): OvernightTask[] {
 }
 
 function saveTasks(tasks: OvernightTask[]) {
-  writeFileSync(OVERNIGHT_STATE, JSON.stringify({ tasks }, null, 2));
+  const tmpPath = OVERNIGHT_STATE + ".tmp";
+  writeFileSync(tmpPath, JSON.stringify({ tasks }, null, 2));
+  renameSync(tmpPath, OVERNIGHT_STATE);
 }
 
 export function addOvernightTask(task: string, deliverTo?: string): OvernightTask {

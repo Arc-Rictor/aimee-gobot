@@ -330,21 +330,77 @@ export async function getRecentMessages(
 
 /**
  * Build a formatted conversation context string from recent messages.
+ * Includes cross-channel messages for unified context across voice, Discord, etc.
  */
 export async function getConversationContext(
   chatId: string,
   limit: number = 10
 ): Promise<string> {
-  const messages = await getRecentMessages(chatId, limit);
-  if (messages.length === 0) return "";
+  // Fetch both channel-specific and cross-channel messages
+  const results = await Promise.allSettled([
+    getRecentMessages(chatId, limit),
+    getRecentMessagesAll(limit),
+  ]);
+  const channelMessages = results[0].status === "fulfilled" ? results[0].value : [];
+  const allMessages = results[1].status === "fulfilled" ? results[1].value : [];
 
-  return messages
+  // Merge and deduplicate by id, preferring channel messages
+  const seen = new Set<string>();
+  const merged: Message[] = [];
+
+  for (const msg of channelMessages) {
+    if (msg.id) seen.add(msg.id);
+    merged.push(msg);
+  }
+  for (const msg of allMessages) {
+    if (msg.id && seen.has(msg.id)) continue;
+    // Only include cross-channel messages (skip ones from this channel)
+    if (msg.chat_id !== chatId) {
+      merged.push(msg);
+    }
+  }
+
+  // Sort by creation time
+  merged.sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return ta - tb;
+  });
+
+  // Take the most recent `limit` messages
+  const recent = merged.slice(-limit);
+
+  if (recent.length === 0) return "";
+
+  return recent
     .map((msg) => {
       const time = msg.created_at ? getTimeAgo(new Date(msg.created_at)) : "";
       const speaker = msg.role === "user" ? "User" : "Bot";
-      return `[${time}] ${speaker}: ${msg.content}`;
+      const source = msg.chat_id !== chatId ? ` [${msg.chat_id}]` : "";
+      return `[${time}]${source} ${speaker}: ${msg.content}`;
     })
     .join("\n");
+}
+
+/**
+ * Get recent messages across ALL channels, returned in chronological order.
+ */
+export async function getRecentMessagesAll(
+  limit: number = 20
+): Promise<Message[]> {
+  const backend = getBackend();
+
+  if (backend === "convex") {
+    const client = getConvex()!;
+    try {
+      const docs = await client.query(anyApi.messages.getRecentAll, { limit });
+      return (docs || []).map(convexToMessage);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 /**
@@ -631,7 +687,9 @@ export function formatFactsList(facts: MemoryItem[]): string {
  * Build a combined memory context string with facts and goals.
  */
 export async function getMemoryContext(): Promise<string> {
-  const [facts, goals] = await Promise.all([getFacts(), getActiveGoals()]);
+  const results = await Promise.allSettled([getFacts(), getActiveGoals()]);
+  const facts = results[0].status === "fulfilled" ? results[0].value : [];
+  const goals = results[1].status === "fulfilled" ? results[1].value : [];
 
   const sections: string[] = [];
 

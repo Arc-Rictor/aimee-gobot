@@ -125,6 +125,24 @@ export const semanticSearch = action({
 });
 
 /**
+ * Get N most recent messages across ALL channels, returned in chronological order.
+ * Used by the voice app to load cross-interface conversation context.
+ */
+export const getRecentAll = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 20;
+    const messages = await ctx.db
+      .query("messages")
+      .order("desc")
+      .take(limit);
+    return messages.reverse();
+  },
+});
+
+/**
  * Get recent messages across all chats for board meeting context.
  * Returns messages from the last N days, grouped by thread/channel.
  */
