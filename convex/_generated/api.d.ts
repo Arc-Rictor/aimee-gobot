@@ -11,6 +11,7 @@
 import type * as assets from "../assets.js";
 import type * as asyncTasks from "../asyncTasks.js";
 import type * as callTranscripts from "../callTranscripts.js";
+import type * as compactions from "../compactions.js";
 import type * as embeddingPatches from "../embeddingPatches.js";
 import type * as embeddings from "../embeddings.js";
 import type * as http from "../http.js";
@@ -34,6 +35,7 @@ declare const fullApi: ApiFromModules<{
   assets: typeof assets;
   asyncTasks: typeof asyncTasks;
   callTranscripts: typeof callTranscripts;
+  compactions: typeof compactions;
   embeddingPatches: typeof embeddingPatches;
   embeddings: typeof embeddings;
   http: typeof http;

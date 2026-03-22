@@ -25,6 +25,7 @@ import {
 import { callFallbackLLM } from "./lib/fallback-llm";
 import {
   saveMessage, getConversationContext, searchMessages, log as sbLog,
+  maybeCompactConversation,
 } from "./lib/convex";
 import { classifyComplexity } from "./lib/model-router";
 import { getAgentConfig, getUserProfile } from "./agents";
@@ -87,6 +88,26 @@ const USER_NAME = process.env.USER_NAME || "User";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_USER_ID = process.env.DISCORD_USER_ID;
 
+// Build allowed user set: DISCORD_ALLOWED_USERS (comma-separated) takes priority,
+// falls back to single DISCORD_USER_ID for backward compatibility.
+// If neither is set, the bot responds to everyone (open access).
+const ALLOWED_USERS: Set<string> | null = (() => {
+  const allowedList = process.env.DISCORD_ALLOWED_USERS;
+  if (allowedList) {
+    const ids = allowedList.split(",").map(id => id.trim()).filter(Boolean);
+    return ids.length > 0 ? new Set(ids) : null;
+  }
+  if (DISCORD_USER_ID) {
+    return new Set([DISCORD_USER_ID]);
+  }
+  return null;
+})();
+
+function isUserAllowed(userId: string): boolean {
+  if (!ALLOWED_USERS) return true; // open access
+  return ALLOWED_USERS.has(userId);
+}
+
 if (!DISCORD_BOT_TOKEN) {
   console.error("DISCORD_BOT_TOKEN is not set in .env");
   process.exit(1);
@@ -132,6 +153,20 @@ interface PendingApproval {
 
 // Only one pending approval at a time (most recent wins)
 let pendingApproval: PendingApproval | null = null;
+
+/**
+ * Safe sendTyping — Discord can reject this on partial channels, rate limits,
+ * or during gateway instability. Never worth crashing over.
+ */
+async function safeSendTyping(channel: any): Promise<void> {
+  try {
+    if (typeof channel.sendTyping === "function") {
+      await channel.sendTyping();
+    }
+  } catch (err: any) {
+    console.warn(`[DISCORD] sendTyping failed (non-fatal): ${err.message}`);
+  }
+}
 
 /**
  * Build Discord action rows with approval buttons.
@@ -365,7 +400,10 @@ client.once("ready", () => {
   isConnected = true;
   reconnectAttempts = 0;
   console.log(`\n[DISCORD] ${BOT_NAME} is online as ${client.user?.tag}`);
-  console.log(`[DISCORD] Listening for messages${DISCORD_USER_ID ? ` from user ${DISCORD_USER_ID}` : " from everyone (no DISCORD_USER_ID set — open access!)"}`);
+  const accessMode = ALLOWED_USERS
+    ? `from ${ALLOWED_USERS.size} allowed user(s): ${[...ALLOWED_USERS].join(", ")}`
+    : "from everyone (open access — set DISCORD_ALLOWED_USERS to restrict)";
+  console.log(`[DISCORD] Listening for messages ${accessMode}`);
   sbLog("info", "discord-bot", "Discord bot started", { tag: client.user?.tag });
 });
 
@@ -439,8 +477,8 @@ client.on("messageCreate", async (msg: DiscordMessage) => {
   // Ignore bot messages
   if (msg.author.bot) return;
 
-  // If DISCORD_USER_ID is set, only respond to that user
-  if (DISCORD_USER_ID && msg.author.id !== DISCORD_USER_ID) return;
+  // Only respond to allowed users (if configured)
+  if (!isUserAllowed(msg.author.id)) return;
 
   let text = msg.content.trim();
   let isVoiceMessage = false;
@@ -476,7 +514,7 @@ client.on("messageCreate", async (msg: DiscordMessage) => {
     console.log(`[DISCORD] Voice message detected: ${audioAttachment.name} (${audioAttachment.contentType})`);
 
     try {
-      await msg.channel.sendTyping();
+      await safeSendTyping(msg.channel);
       const audioRes = await fetch(audioAttachment.url);
       if (!audioRes.ok) throw new Error(`Download failed: ${audioRes.status}`);
       const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
@@ -583,7 +621,7 @@ Otherwise, just type your message.`);
   // Reflect command — on-demand nightly reflection
   if (text === "/reflect" || text === "!reflect") {
     await msg.reply("🪞 Running reflection... gathering today's inputs and thinking it over.");
-    try { await msg.channel.sendTyping(); } catch {}
+    await safeSendTyping(msg.channel);
     try {
       const { gatherDayInputs, runReflection, storeReflection } = await import("./discord-reflection");
       const today = new Date().toLocaleDateString("en-CA", { timeZone: process.env.USER_TIMEZONE || "UTC" });
@@ -637,11 +675,11 @@ Otherwise, just type your message.`);
   });
 
   // Show typing indicator
-  try { await msg.channel.sendTyping(); } catch { /* ignore */ }
+  await safeSendTyping(msg.channel);
 
   // Keep typing active during processing
   const typingInterval = setInterval(async () => {
-    try { await msg.channel.sendTyping(); } catch { /* ignore */ }
+    await safeSendTyping(msg.channel);
   }, 8000);
 
   try {
@@ -655,6 +693,9 @@ Otherwise, just type your message.`);
       content: response,
       metadata: { agent: currentAgent, source: "discord" },
     });
+
+    // Trigger session compaction in the background (non-blocking)
+    maybeCompactConversation(chatId).catch(() => {});
 
     // Process intents (goals, facts, etc.)
     await processIntents(response);
@@ -746,7 +787,11 @@ Otherwise, just type your message.`);
     }
   } catch (err) {
     console.error("[DISCORD] Error processing message:", err);
-    await msg.reply("Sorry, I hit an error processing that. Please try again.");
+    try {
+      await msg.reply("Sorry, I hit an error processing that. Please try again.");
+    } catch (replyErr) {
+      console.error("[DISCORD] Failed to send error reply (Discord may be down):", (replyErr as any).message);
+    }
   } finally {
     clearInterval(typingInterval);
   }
@@ -821,20 +866,11 @@ async function resolveApproval(
   }
 
   // Show typing
-  try {
-    const channel = client.channels.cache.get(approval.channelId);
-    if (channel && "sendTyping" in channel) {
-      await (channel as any).sendTyping();
-    }
-  } catch {}
+  const approvalChannel = client.channels.cache.get(approval.channelId);
+  await safeSendTyping(approvalChannel);
 
   const typingInterval = setInterval(async () => {
-    try {
-      const channel = client.channels.cache.get(approval.channelId);
-      if (channel && "sendTyping" in channel) {
-        await (channel as any).sendTyping();
-      }
-    } catch {}
+    await safeSendTyping(approvalChannel);
   }, 8000);
 
   try {
@@ -921,9 +957,9 @@ client.on("interactionCreate", async (interaction) => {
   if (!customId.startsWith("approve:")) return;
 
   // Check if the user is authorized
-  if (DISCORD_USER_ID && buttonInteraction.user.id !== DISCORD_USER_ID) {
+  if (!isUserAllowed(buttonInteraction.user.id)) {
     await buttonInteraction.reply({
-      content: "Only the bot owner can approve actions.",
+      content: "Only authorized users can approve actions.",
       flags: 64, // ephemeral
     });
     return;
@@ -939,5 +975,35 @@ client.on("interactionCreate", async (interaction) => {
 // 8. Start
 // ---------------------------------------------------------------------------
 
+// Catch unhandled rejections from Discord.js internals (gateway fetches, etc.)
+// Without this, a transient Discord API failure can crash the entire process.
+process.on("unhandledRejection", (reason: any) => {
+  const msg = reason?.message || String(reason);
+  console.error(`[DISCORD] Unhandled rejection (suppressed crash): ${msg}`);
+  sbLog("error", "discord-bot", `Unhandled rejection: ${msg}`);
+});
+
 console.log(`[DISCORD] Starting ${BOT_NAME}...`);
-client.login(DISCORD_BOT_TOKEN);
+
+// Resilient login — retry on gateway failures (Discord outages, rate limits)
+async function loginWithRetry(retries = 3, delayMs = 5000) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await client.login(DISCORD_BOT_TOKEN);
+      return;
+    } catch (err: any) {
+      console.error(`[DISCORD] Login attempt ${attempt}/${retries} failed: ${err.message}`);
+      sbLog("error", "discord-bot", `Login failed (attempt ${attempt})`, { error: err.message });
+      if (attempt < retries) {
+        console.log(`[DISCORD] Retrying in ${delayMs / 1000}s...`);
+        await new Promise(r => setTimeout(r, delayMs));
+        delayMs *= 2; // exponential backoff
+      } else {
+        console.error(`[DISCORD] All login attempts exhausted. Exiting for restart.`);
+        process.exit(1);
+      }
+    }
+  }
+}
+
+loginWithRetry();

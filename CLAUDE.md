@@ -598,6 +598,7 @@ ANTHROPIC_API_KEY=sk-ant-api03-your_key_here
 
 # Discord credentials
 DISCORD_BOT_TOKEN=your_discord_bot_token
+DISCORD_ALLOWED_USERS=user_id_1,user_id_2  # restrict who can talk to the bot
 DISCORD_CHANNEL_GENERAL=channel_id
 DISCORD_CHANNEL_ALERTS=channel_id
 DISCORD_CHANNEL_BRIEFING=channel_id
@@ -687,6 +688,7 @@ convex/                  # Convex backend (primary database)
   embeddings.ts          # OpenAI embedding generation (actions)
   embeddingPatches.ts    # Embedding repair functions
   callTranscripts.ts     # Voice call transcript storage
+  compactions.ts         # Session compaction summaries (condensed conversation history)
   migrations.ts          # Schema versioning + migrations
   http.ts                # HTTP webhook routes (future)
 scripts/

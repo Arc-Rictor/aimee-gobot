@@ -193,6 +193,18 @@ export default defineSchema({
       filterFields: ["category"],
     }),
 
+  // Session compaction summaries — condensed conversation history
+  compactions: defineTable({
+    createdAt: v.number(),
+    chatId: v.string(),
+    summary: v.string(), // LLM-generated summary of older messages
+    messagesCompacted: v.number(), // how many messages were summarized
+    oldestMessageAt: v.number(), // timestamp of earliest compacted message
+    newestMessageAt: v.number(), // timestamp of latest compacted message
+  })
+    .index("by_chatId", ["chatId"])
+    .index("by_chatId_createdAt", ["chatId", "createdAt"]),
+
   // Feedback loop interaction scores
   interactionScores: defineTable({
     date: v.string(),

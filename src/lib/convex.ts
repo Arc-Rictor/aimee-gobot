@@ -336,13 +336,15 @@ export async function getConversationContext(
   chatId: string,
   limit: number = 10
 ): Promise<string> {
-  // Fetch both channel-specific and cross-channel messages
+  // Fetch compaction summary, channel messages, and cross-channel messages in parallel
   const results = await Promise.allSettled([
     getRecentMessages(chatId, limit),
     getRecentMessagesAll(limit),
+    getLatestCompaction(chatId),
   ]);
   const channelMessages = results[0].status === "fulfilled" ? results[0].value : [];
   const allMessages = results[1].status === "fulfilled" ? results[1].value : [];
+  const compaction = results[2].status === "fulfilled" ? results[2].value : null;
 
   // Merge and deduplicate by id, preferring channel messages
   const seen = new Set<string>();
@@ -370,9 +372,16 @@ export async function getConversationContext(
   // Take the most recent `limit` messages
   const recent = merged.slice(-limit);
 
-  if (recent.length === 0) return "";
+  const parts: string[] = [];
 
-  return recent
+  // Prepend compaction summary if available — gives Claude context beyond the recent window
+  if (compaction) {
+    parts.push(`[Earlier conversation summary — ${compaction.messagesCompacted} messages compacted]\n${compaction.summary}`);
+  }
+
+  if (recent.length === 0 && !compaction) return "";
+
+  const formatted = recent
     .map((msg) => {
       const time = msg.created_at ? getTimeAgo(new Date(msg.created_at)) : "";
       const speaker = msg.role === "user" ? "User" : "Bot";
@@ -380,6 +389,10 @@ export async function getConversationContext(
       return `[${time}]${source} ${speaker}: ${msg.content}`;
     })
     .join("\n");
+
+  if (formatted) parts.push(formatted);
+
+  return parts.join("\n\n---\n\n");
 }
 
 /**
@@ -1140,4 +1153,123 @@ export async function testConnection(): Promise<string> {
   }
 
   return "No database configured (missing CONVEX_URL and SUPABASE_URL).";
+}
+
+// ---------------------------------------------------------------------------
+// Session Compaction
+// ---------------------------------------------------------------------------
+
+// Compact after this many messages accumulate since the last compaction
+const COMPACTION_THRESHOLD = 20;
+
+interface Compaction {
+  summary: string;
+  messagesCompacted: number;
+  oldestMessageAt: number;
+  newestMessageAt: number;
+}
+
+/**
+ * Get the most recent compaction summary for a chat.
+ */
+export async function getLatestCompaction(chatId: string): Promise<Compaction | null> {
+  if (getBackend() !== "convex") return null;
+
+  const client = getConvex()!;
+  try {
+    const result = await client.query(anyApi.compactions.getLatest, { chatId });
+    return result ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a conversation needs compaction and run it if so.
+ * Called after saving messages — runs asynchronously without blocking the response.
+ *
+ * Uses Haiku for fast, cheap summarization (~$0.003 per compaction).
+ */
+export async function maybeCompactConversation(chatId: string): Promise<void> {
+  if (getBackend() !== "convex") return;
+  if (!process.env.ANTHROPIC_API_KEY) return; // Need API access for summarization
+
+  const client = getConvex()!;
+
+  try {
+    // Get the latest compaction to find the cutoff point
+    const latest = await client.query(anyApi.compactions.getLatest, { chatId });
+    const since = latest?.newestMessageAt ?? 0;
+
+    // Count messages since last compaction
+    const count = await client.query(anyApi.compactions.countMessagesSince, {
+      chatId,
+      since,
+    });
+
+    if (count < COMPACTION_THRESHOLD) return;
+
+    console.log(`[COMPACTION] ${chatId}: ${count} messages since last compaction, compacting...`);
+
+    // Get the messages to compact (all except the most recent 10, which stay as live context)
+    const allSince = await client.query(anyApi.compactions.getMessagesInRange, {
+      chatId,
+      after: since,
+      before: Date.now(),
+      limit: 200,
+    });
+
+    if (allSince.length < COMPACTION_THRESHOLD) return;
+
+    // Keep the most recent 10 messages as live context; compact the rest
+    const toCompact = allSince.slice(0, -10);
+    if (toCompact.length === 0) return;
+
+    // Build the conversation text to summarize
+    const conversationText = toCompact
+      .map((msg: any) => {
+        const speaker = msg.role === "user" ? "User" : "Bot";
+        return `${speaker}: ${msg.content}`;
+      })
+      .join("\n");
+
+    // Include previous compaction summary for continuity
+    const previousContext = latest?.summary
+      ? `Previous summary: ${latest.summary}\n\n`
+      : "";
+
+    // Summarize using Haiku (fast + cheap)
+    const { default: Anthropic } = await import("@anthropic-ai/sdk");
+    const anthropic = new Anthropic();
+
+    const response = await anthropic.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: `${previousContext}Summarize this conversation concisely. Capture: key topics discussed, decisions made, action items, important facts shared, and the current state of any ongoing threads. Be factual and brief.\n\n${conversationText}`,
+        },
+      ],
+    });
+
+    const summary =
+      response.content[0].type === "text" ? response.content[0].text : "";
+
+    if (!summary) return;
+
+    // Store the compaction
+    await client.mutation(anyApi.compactions.insert, {
+      chatId,
+      summary,
+      messagesCompacted: (latest?.messagesCompacted ?? 0) + toCompact.length,
+      oldestMessageAt: latest?.oldestMessageAt ?? toCompact[0].createdAt,
+      newestMessageAt: toCompact[toCompact.length - 1].createdAt,
+    });
+
+    console.log(`[COMPACTION] ${chatId}: compacted ${toCompact.length} messages (total: ${(latest?.messagesCompacted ?? 0) + toCompact.length})`);
+  } catch (err) {
+    // Compaction is best-effort — never block the user
+    console.error(`[COMPACTION] Error:`, (err as any).message);
+  }
 }
