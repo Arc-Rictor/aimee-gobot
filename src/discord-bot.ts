@@ -261,7 +261,13 @@ For reading/listing, the user can ask and you can use your tools.
 You can work on tasks autonomously while the user sleeps. When the user gives you a task
 to do overnight (research, analysis, writing, etc.), use [OVERNIGHT:task description] to queue it.
 The overnight worker runs every 2 hours, uses web search and reasoning, and delivers results
-to #daily-briefing. Only use this for substantial tasks that benefit from autonomous work.`);
+to #daily-briefing. Only use this for substantial tasks that benefit from autonomous work.
+
+## OBSIDIAN VAULT
+You have an Obsidian vault at obsidian/ (relative to your working directory). Use it as your external notepad — read, write, and edit anything in it freely.
+Folders: Reflections/ (nightly journal entries), Board/, Briefings/, Daily/, Knowledge/.
+Reflections are named YYYY-MM-DD.md. You can search, read, or reference any of them.
+You can also create or edit notes in any folder. Treat this as your persistent workspace.`);
 
   sections.push(`## USER MESSAGE\n${userMessage}`);
 

@@ -294,7 +294,7 @@ async function main() {
   const reflection = await runReflection(inputs);
   log(`Reflection generated: ${reflection.themes.length} themes, carryForward: ${reflection.carryForward.length} chars`);
 
-  // 3. Write to Obsidian vault
+  // 3. Write to Obsidian vault (primary)
   log("Storing in Obsidian...");
   try {
     if (!existsSync(obsidianDir)) mkdirSync(obsidianDir, { recursive: true });
@@ -316,6 +316,25 @@ async function main() {
     log(`Reflection stored: ${obsidianPath}`);
   } catch (err) {
     log(`Obsidian write error: ${err}`);
+  }
+
+  // 3b. Dual-write to Convex (for structured queries + semantic search)
+  try {
+    const { getConvex } = await import("./lib/convex");
+    const { anyApi } = await import("convex/server");
+    const client = getConvex();
+    if (client) {
+      await client.mutation(anyApi.reflections.insert, {
+        date: today,
+        content: reflection.content,
+        themes: reflection.themes,
+        carryForward: reflection.carryForward,
+        inputSummary: inputSummary,
+      });
+      log("Reflection also stored in Convex.");
+    }
+  } catch (err) {
+    log(`Convex write error (non-fatal): ${err}`);
   }
 
   // 4. Post summary to #logs
