@@ -136,22 +136,19 @@ async function getStaleTasks(): Promise<string> {
 
 async function getReflectionCarryForward(): Promise<string> {
   try {
-    const { getConvex } = await import("./lib/convex");
-    const { anyApi } = await import("convex/server");
-    const client = getConvex();
-    if (!client) return "";
-
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toLocaleDateString("en-CA", { timeZone: USER_TIMEZONE });
 
-    const reflection = await client.query(anyApi.reflections.getByDate, {
-      date: yesterdayStr,
-    });
+    const filePath = join(PROJECT_ROOT, "obsidian", "Reflections", `${yesterdayStr}.md`);
+    if (!existsSync(filePath)) return "";
 
-    if (!reflection || !reflection.carryForward) return "";
+    const content = readFileSync(filePath, "utf-8");
+    // Extract the Carry Forward section
+    const cfMatch = content.match(/## Carry Forward\n\n([\s\S]*?)(\n---|\n#|$)/);
+    if (!cfMatch || !cfMatch[1].trim()) return "";
 
-    return `🪞 **FROM YESTERDAY'S REFLECTION**\n${reflection.carryForward}`;
+    return `🪞 **FROM YESTERDAY'S REFLECTION**\n${cfMatch[1].trim()}`;
   } catch {
     return "";
   }
@@ -306,6 +303,25 @@ async function main() {
   }
 
   log("Briefing sent to Discord successfully!");
+
+  // Write to Obsidian vault
+  try {
+    const obsidianDir = join(PROJECT_ROOT, "obsidian", "Briefings");
+    if (!existsSync(obsidianDir)) mkdirSync(obsidianDir, { recursive: true });
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: USER_TIMEZONE });
+    const obsidianPath = join(obsidianDir, `${today}.md`);
+    // Strip Discord emoji formatting for cleaner markdown
+    const cleanBriefing = briefing
+      .replace(/☀️ \*\*/g, "# ")
+      .replace(/\*\*\n/g, "\n")
+      .replace(/🎯 \*\*/g, "## ")
+      .replace(/🧠 \*\*/g, "## ")
+      .replace(/💡 \*\*/g, "## ");
+    writeFileSync(obsidianPath, `# Briefing — ${today}\n\n${cleanBriefing}\n\n---\n_Generated at ${new Date().toISOString()}_\n`);
+    log(`Written to Obsidian: ${obsidianPath}`);
+  } catch (err) {
+    log(`Obsidian write error: ${err}`);
+  }
 
   // Record that briefing was sent today
   try {

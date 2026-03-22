@@ -2,11 +2,15 @@
  * Reflections Data Source
  *
  * Surfaces yesterday's carryForward items in the morning briefing.
- * Requires: CONVEX_URL (always available when Convex is configured)
+ * Reads from Obsidian vault (obsidian/Reflections/).
  */
 
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { register } from "../registry";
 import type { DataSource, DataSourceResult } from "../types";
+
+const PROJECT_ROOT = process.env.GO_PROJECT_ROOT || process.cwd();
 
 const reflectionsSource: DataSource = {
   id: "reflections",
@@ -14,41 +18,41 @@ const reflectionsSource: DataSource = {
   emoji: "\uD83E\uDE9E",
 
   isAvailable(): boolean {
-    return !!process.env.CONVEX_URL;
+    return existsSync(join(PROJECT_ROOT, "obsidian", "Reflections"));
   },
 
   async fetch(): Promise<DataSourceResult> {
     try {
-      const { getConvex } = await import("../../convex");
-      const { anyApi } = await import("convex/server");
-      const client = getConvex();
-      if (!client) return { lines: [], meta: { count: 0 } };
-
-      // Get yesterday's date
       const tz = process.env.USER_TIMEZONE || "UTC";
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toLocaleDateString("en-CA", { timeZone: tz });
 
-      const reflection = await client.query(anyApi.reflections.getByDate, {
-        date: yesterdayStr,
-      });
+      const filePath = join(PROJECT_ROOT, "obsidian", "Reflections", `${yesterdayStr}.md`);
+      if (!existsSync(filePath)) return { lines: [], meta: { count: 0 } };
 
-      if (!reflection || !reflection.carryForward) {
-        return { lines: [], meta: { count: 0 } };
-      }
+      const content = readFileSync(filePath, "utf-8");
 
-      const lines = reflection.carryForward
+      // Extract carry forward section
+      const cfMatch = content.match(/## Carry Forward\n\n([\s\S]*?)(\n---|\n#|$)/);
+      if (!cfMatch || !cfMatch[1].trim()) return { lines: [], meta: { count: 0 } };
+
+      const carryForward = cfMatch[1].trim();
+      const lines = carryForward
         .split("\n")
         .map((l: string) => l.trim())
         .filter((l: string) => l.length > 0);
+
+      // Extract themes from the file
+      const themesMatch = content.match(/\*\*Themes:\*\* (.+)/);
+      const themes = themesMatch ? themesMatch[1].split(", ") : [];
 
       return {
         lines,
         meta: {
           count: lines.length,
           date: yesterdayStr,
-          themes: reflection.themes,
+          themes,
         },
       };
     } catch {

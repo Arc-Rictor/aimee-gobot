@@ -258,65 +258,24 @@ Respond with ONLY the JSON object, no markdown fences.`;
 }
 
 // ---------------------------------------------------------------------------
-// Store in Convex
-// ---------------------------------------------------------------------------
-
-export async function storeReflection(
-  date: string,
-  reflection: { content: string; themes: string[]; carryForward: string },
-  inputSummary: string
-): Promise<boolean> {
-  try {
-    const { getConvex } = await import("./lib/convex");
-    const { anyApi } = await import("convex/server");
-    const client = getConvex();
-    if (!client) {
-      log("No Convex client available");
-      return false;
-    }
-
-    await client.mutation(anyApi.reflections.insert, {
-      date,
-      content: reflection.content,
-      themes: reflection.themes,
-      carryForward: reflection.carryForward,
-      inputSummary,
-      metadata: { model: "claude-haiku-4-5-20251001", generatedAt: new Date().toISOString() },
-    });
-    return true;
-  } catch (err) {
-    log(`Convex store error: ${err}`);
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 async function main() {
   const today = new Date().toLocaleDateString("en-CA", { timeZone: USER_TIMEZONE });
 
-  // Dedup: skip if reflection already done today (file-based)
+  // Dedup: skip if reflection already done today (check Obsidian file or state file)
+  const obsidianDir = join(PROJECT_ROOT, "obsidian", "Reflections");
+  const obsidianPath = join(obsidianDir, `${today}.md`);
+  if (existsSync(obsidianPath)) {
+    log(`Reflection already exists for ${today}, skipping.`);
+    return;
+  }
   try {
     if (existsSync(STATE_FILE)) {
       const state = JSON.parse(readFileSync(STATE_FILE, "utf-8"));
       if (state.lastReflectionDate === today) {
         log(`Reflection already done today (${today}), skipping.`);
-        return;
-      }
-    }
-  } catch {}
-
-  // Dedup: also check Convex (in case state file was lost)
-  try {
-    const { getConvex } = await import("./lib/convex");
-    const { anyApi } = await import("convex/server");
-    const client = getConvex();
-    if (client) {
-      const existing = await client.query(anyApi.reflections.getByDate, { date: today });
-      if (existing) {
-        log(`Reflection already exists in Convex for ${today}, skipping.`);
         return;
       }
     }
@@ -335,13 +294,28 @@ async function main() {
   const reflection = await runReflection(inputs);
   log(`Reflection generated: ${reflection.themes.length} themes, carryForward: ${reflection.carryForward.length} chars`);
 
-  // 3. Store in Convex
-  log("Storing in Convex...");
-  const stored = await storeReflection(today, reflection, inputSummary);
-  if (stored) {
-    log("Reflection stored successfully.");
-  } else {
-    log("WARNING: Failed to store reflection in Convex.");
+  // 3. Write to Obsidian vault
+  log("Storing in Obsidian...");
+  try {
+    if (!existsSync(obsidianDir)) mkdirSync(obsidianDir, { recursive: true });
+    const obsidianContent = [
+      `# Reflection — ${today}`,
+      "",
+      `**Themes:** ${reflection.themes.join(", ") || "none"}`,
+      "",
+      reflection.content,
+      "",
+      "## Carry Forward",
+      "",
+      reflection.carryForward,
+      "",
+      "---",
+      `_Generated at ${new Date().toISOString()}_`,
+    ].join("\n");
+    writeFileSync(obsidianPath, obsidianContent);
+    log(`Reflection stored: ${obsidianPath}`);
+  } catch (err) {
+    log(`Obsidian write error: ${err}`);
   }
 
   // 4. Post summary to #logs
@@ -351,7 +325,7 @@ async function main() {
     await sendDiscordMessage(logsChannelId, logMsg);
   }
 
-  // 5. Save state
+  // 6. Save state
   try {
     writeFileSync(STATE_FILE, JSON.stringify({ lastReflectionDate: today }, null, 2));
   } catch {}

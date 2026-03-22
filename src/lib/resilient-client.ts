@@ -26,7 +26,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 let anthropicClient: Anthropic | null = null;
 let openRouterClient: Anthropic | null = null;
-let anthropicAvailable = true;
+let anthropicAvailable = !process.env.SKIP_ANTHROPIC_API;
 let lastCheckTime = 0;
 
 const RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
@@ -123,6 +123,8 @@ export function markAnthropicDown(): void {
  */
 export function isAnthropicAvailable(): boolean {
   if (!anthropicAvailable) {
+    // Never re-enable if explicitly skipped via env
+    if (process.env.SKIP_ANTHROPIC_API) return false;
     const elapsed = Date.now() - lastCheckTime;
     if (elapsed > RETRY_INTERVAL_MS) {
       console.log("[Resilient] Re-checking Anthropic availability...");
