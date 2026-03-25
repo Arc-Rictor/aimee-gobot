@@ -17,7 +17,7 @@ import { readFile, writeFile } from "fs/promises";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 
 import { loadEnv } from "./lib/env";
-import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse } from "./lib/claude";
+import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse, READ_ONLY_TOOLS } from "./lib/claude";
 import {
   processIntents, getMemoryContext, addFact, addGoal,
   completeGoal, deleteFact, cancelGoal, listGoals, listFacts,
@@ -263,11 +263,20 @@ to do overnight (research, analysis, writing, etc.), use [OVERNIGHT:task descrip
 The overnight worker runs every 2 hours, uses web search and reasoning, and delivers results
 to #daily-briefing. Only use this for substantial tasks that benefit from autonomous work.
 
+## FILESYSTEM ACCESS
+You have READ-ONLY access to the entire device filesystem. You can:
+- Read any file: use the Read tool with absolute paths (e.g., /home/aimee/somefile.txt)
+- Search for files: use the Glob tool (e.g., pattern "**/*.md" in path "/home/aimee")
+- Search file contents: use the Grep tool to find text across files
+- Fetch web pages: use WebFetch and WebSearch
+
+You CANNOT write, edit, or execute commands on this channel — it is read-only for safety.
+When asked to find or read something, always try using your tools first. Do not assume you lack access.
+
 ## OBSIDIAN VAULT
-You have an Obsidian vault at obsidian/ (relative to your working directory). Use it as your external notepad — read, write, and edit anything in it freely.
+You have an Obsidian vault at obsidian/ (relative to your working directory). Use it as your external notepad — read and reference anything in it freely.
 Folders: Reflections/ (nightly journal entries), Board/, Briefings/, Daily/, Knowledge/.
-Reflections are named YYYY-MM-DD.md. You can search, read, or reference any of them.
-You can also create or edit notes in any folder. Treat this as your persistent workspace.`);
+Reflections are named YYYY-MM-DD.md. You can search, read, or reference any of them.`);
 
   sections.push(`## USER MESSAGE\n${userMessage}`);
 
@@ -277,7 +286,7 @@ You can also create or edit notes in any folder. Treat this as your persistent w
     prompt: fullPrompt,
     outputFormat: "json",
     permissionMode: "bypassPermissions",
-    ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+    allowedTools: READ_ONLY_TOOLS,
     resumeSessionId: sessionId || undefined,
     timeoutMs: 180_000, // 3 minutes
     cwd: PROJECT_ROOT,
@@ -292,7 +301,7 @@ You can also create or edit notes in any folder. Treat this as your persistent w
       prompt: fullPrompt,
       outputFormat: "json",
       permissionMode: "bypassPermissions",
-      ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+      allowedTools: READ_ONLY_TOOLS,
       timeoutMs: 180_000,
       cwd: PROJECT_ROOT,
     });

@@ -19,7 +19,7 @@ import { createWriteStream, existsSync } from "fs";
 
 import { loadEnv } from "./lib/env";
 import { sanitizeForTelegram, sendResponse, createTypingIndicator } from "./lib/telegram";
-import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse } from "./lib/claude";
+import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse, READ_ONLY_TOOLS } from "./lib/claude";
 import {
   processIntents,
   getMemoryContext,
@@ -1123,13 +1123,11 @@ Example: [ASSET_DESC: Birthday invitation with pink bunny holding a cupcake | bi
 
   const fullPrompt = sections.join("\n\n---\n\n");
 
-  // Call Claude subprocess
-  // When allowedTools is omitted, Claude Code gets full access to all tools,
-  // MCP servers, skills, and hooks configured in your Claude Code settings.
+  // Call Claude subprocess — read-only on external channels
   const result = await callClaudeSubprocess({
     prompt: fullPrompt,
     outputFormat: "json",
-    ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+    allowedTools: READ_ONLY_TOOLS,
     resumeSessionId: sessionState.sessionId || undefined,
     timeoutMs: 1_800_000, // 30 minutes
     cwd: PROJECT_ROOT,
@@ -1338,7 +1336,7 @@ Example: [ASSET_DESC: Birthday invitation with pink bunny holding a cupcake | bi
   // Call streaming subprocess
   const result = await callClaudeStreaming({
     prompt: fullPrompt,
-    ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+    allowedTools: READ_ONLY_TOOLS,
     resumeSessionId: sessionState.sessionId || undefined,
     timeoutMs: 1_800_000,
     cwd: PROJECT_ROOT,

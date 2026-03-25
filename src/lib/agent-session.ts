@@ -21,6 +21,7 @@ import { selectModelForMessage, toOpenRouterModel } from "./model-router";
 import { AskUserSignal } from "./anthropic-processor";
 import { buildTaskKeyboard } from "./task-queue";
 import { callFallbackLLM } from "./fallback-llm";
+import { READ_ONLY_TOOLS } from "./claude";
 import {
   isAnthropicAvailable,
   markAnthropicDown,
@@ -237,20 +238,7 @@ export async function processWithAgentSDK(
     // Load BOTH user (~/.claude/) and project settings — enables Skills, rules, CLAUDE.md
     settingSources: ["user", "project"],
     // Enable all Claude Code built-in tools INCLUDING Skill
-    allowedTools: [
-      "Skill",        // Skill system — reads from ~/.claude/skills/ and project skills
-      "Read",         // Read files
-      "Write",        // Write files
-      "Edit",         // Edit files
-      "Bash",         // Shell commands
-      "Glob",         // File pattern search
-      "Grep",         // Content search
-      "WebFetch",     // Fetch web content
-      "WebSearch",    // Search the web
-      "Task",         // Spawn sub-agents
-      "TodoRead",     // Read todos
-      "TodoWrite",    // Write todos
-    ],
+    allowedTools: READ_ONLY_TOOLS,
     permissionMode: "acceptEdits",
     persistSession: true,
     thinking: tier === "opus" ? { type: "adaptive" } : { type: "disabled" },

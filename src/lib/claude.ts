@@ -14,6 +14,37 @@ const CLAUDE_PATH = process.env.CLAUDE_PATH || "claude";
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "";
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || "";
 
+/**
+ * Tool permission sets — centralized so every channel uses consistent access.
+ *
+ * READ_ONLY_TOOLS: Full device read access, no modifications.
+ *   Use for external-facing channels (Discord, Telegram, VPS).
+ *
+ * WRITE_TOOLS: Additional tools that can modify files and run commands.
+ *   Only granted to trusted internal channels (CLI/TUI, voice).
+ *
+ * ALL_TOOLS: READ_ONLY_TOOLS + WRITE_TOOLS combined.
+ */
+export const READ_ONLY_TOOLS = [
+  "Read",       // Read any file on the device
+  "Glob",       // Search for files by pattern
+  "Grep",       // Search file contents
+  "WebFetch",   // Fetch web content
+  "WebSearch",  // Search the web
+  "TodoRead",   // Read todos
+];
+
+export const WRITE_TOOLS = [
+  "Write",      // Write files
+  "Edit",       // Edit files
+  "Bash",       // Shell commands
+  "Skill",      // Claude Code skills
+  "Task",       // Spawn sub-agents
+  "TodoWrite",  // Write todos
+];
+
+export const ALL_TOOLS = [...READ_ONLY_TOOLS, ...WRITE_TOOLS];
+
 export interface ClaudeOptions {
   prompt: string;
   outputFormat?: "json" | "text";
@@ -139,6 +170,8 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
   }
 
   if (allowedTools && allowedTools.length > 0) {
+    // --tools makes tools AVAILABLE, --allowedTools auto-approves them (no permission prompt)
+    args.push("--tools", allowedTools.join(","));
     args.push("--allowedTools", allowedTools.join(","));
   }
 
@@ -155,7 +188,8 @@ export async function callClaude(options: ClaudeOptions): Promise<ClaudeResult> 
     ? ["/usr/bin/caffeinate", "-i", CLAUDE_PATH, ...args]
     : [CLAUDE_PATH, ...args];
 
-  console.log(`[CLAUDE] Spawning subprocess (timeout: ${Math.round(timeoutMs / 1000)}s, resume: ${resumeSessionId || "none"})...`);
+  console.log(`[CLAUDE] Spawning subprocess (timeout: ${Math.round(timeoutMs / 1000)}s, resume: ${resumeSessionId || "none"}, tools: ${allowedTools?.join(",") || "default"}, permission: ${permissionMode || "default"})...`);
+  console.log(`[CLAUDE] Full args: ${args.filter(a => a !== prompt).join(" ")}`);
   const startTime = Date.now();
 
   const proc = spawn({
@@ -256,7 +290,7 @@ export async function runClaudeWithTimeout(
     "--output-format",
     "text",
     ...(options?.allowedTools
-      ? ["--allowedTools", options.allowedTools.join(",")]
+      ? ["--tools", options.allowedTools.join(","), "--allowedTools", options.allowedTools.join(",")]
       : []),
   ];
   const cmd = IS_MACOS
@@ -348,6 +382,7 @@ export async function callClaudeStreaming(options: ClaudeStreamOptions): Promise
   }
 
   if (allowedTools && allowedTools.length > 0) {
+    args.push("--tools", allowedTools.join(","));
     args.push("--allowedTools", allowedTools.join(","));
   }
 

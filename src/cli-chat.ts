@@ -16,7 +16,7 @@ import { createInterface } from "readline";
 // ---------------------------------------------------------------------------
 
 import { loadEnv } from "./lib/env";
-import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse } from "./lib/claude";
+import { callClaude as callClaudeSubprocess, callClaudeStreaming, isClaudeErrorResponse, ALL_TOOLS } from "./lib/claude";
 import {
   processIntents,
   getMemoryContext,
@@ -133,6 +133,23 @@ async function callClaude(
     sections.push(`## SESSION\nResuming session: ${sessionId}`);
   }
 
+  sections.push(`## FILESYSTEM ACCESS
+You have FULL access to the entire device filesystem. You can:
+- Read any file: use the Read tool with absolute paths (e.g., /home/aimee/somefile.txt)
+- Search for files: use the Glob tool (e.g., pattern "**/*.md" in path "/home/aimee")
+- Search file contents: use the Grep tool to find text across files
+- Write and edit files: use the Write and Edit tools
+- Run shell commands: use the Bash tool
+- Fetch web pages: use WebFetch and WebSearch
+
+This is a trusted internal channel. You have full read AND write access.
+When asked to find, read, or modify something, always try using your tools first. Do not assume you lack access.
+
+## OBSIDIAN VAULT
+You have an Obsidian vault at obsidian/ (relative to your working directory).
+Folders: Reflections/ (nightly journal entries), Board/, Briefings/, Daily/, Knowledge/.
+You can read, write, and edit anything in it freely.`);
+
   sections.push(`## INTENT DETECTION
 If the user sets a goal, include: [GOAL: description | DEADLINE: deadline]
 If a goal is completed, include: [DONE: partial match]
@@ -148,7 +165,7 @@ These tags will be parsed automatically. Include them naturally in your response
   const result = await callClaudeSubprocess({
     prompt: fullPrompt,
     outputFormat: "json",
-    ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+    allowedTools: ALL_TOOLS,
     resumeSessionId: sessionId || undefined,
     timeoutMs: 1_800_000,
     cwd: PROJECT_ROOT,
@@ -202,6 +219,22 @@ async function callClaudeWithProgress(
   if (memoryCtx) sections.push(`## MEMORY\n${memoryCtx}`);
   if (conversationCtx) sections.push(`## RECENT CONVERSATION\n${conversationCtx}`);
   if (sessionId) sections.push(`## SESSION\nResuming session: ${sessionId}`);
+  sections.push(`## FILESYSTEM ACCESS
+You have FULL access to the entire device filesystem. You can:
+- Read any file: use the Read tool with absolute paths (e.g., /home/aimee/somefile.txt)
+- Search for files: use the Glob tool (e.g., pattern "**/*.md" in path "/home/aimee")
+- Search file contents: use the Grep tool to find text across files
+- Write and edit files: use the Write and Edit tools
+- Run shell commands: use the Bash tool
+- Fetch web pages: use WebFetch and WebSearch
+
+This is a trusted internal channel. You have full read AND write access.
+When asked to find, read, or modify something, always try using your tools first. Do not assume you lack access.
+
+## OBSIDIAN VAULT
+You have an Obsidian vault at obsidian/ (relative to your working directory).
+Folders: Reflections/ (nightly journal entries), Board/, Briefings/, Daily/, Knowledge/.
+You can read, write, and edit anything in it freely.`);
   sections.push(`## INTENT DETECTION
 If the user sets a goal, include: [GOAL: description | DEADLINE: deadline]
 If a goal is completed, include: [DONE: partial match]
@@ -215,7 +248,7 @@ These tags will be parsed automatically. Include them naturally in your response
 
   const result = await callClaudeStreaming({
     prompt: fullPrompt,
-    ...(agentConfig?.allowedTools ? { allowedTools: agentConfig.allowedTools } : {}),
+    allowedTools: ALL_TOOLS,
     resumeSessionId: sessionId || undefined,
     timeoutMs: 1_800_000,
     cwd: PROJECT_ROOT,
