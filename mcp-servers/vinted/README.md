@@ -31,7 +31,22 @@ Add this MCP server to your Claude config, then just talk to Claude:
 *"List the trainers in `./listings/example-trainers` — look at the photos,
 write the listing and save a draft."*
 
-`.mcp.json` (or the `mcpServers` block of `~/.claude.json`):
+**Claude Desktop (Windows)** — edit
+`%APPDATA%\Claude\claude_desktop_config.json` (use the full path to `bun.exe`
+and double-backslashes):
+
+```json
+{
+  "mcpServers": {
+    "vinted-uk": {
+      "command": "C:\\Users\\YOU\\.bun\\bin\\bun.exe",
+      "args": ["run", "C:\\Users\\YOU\\aimee-gobot\\mcp-servers\\vinted\\server.ts"]
+    }
+  }
+}
+```
+
+**Claude Desktop (Mac) / Claude Code** — `~/.claude.json` or `.mcp.json`:
 
 ```json
 {
@@ -43,6 +58,11 @@ write the listing and save a draft."*
   }
 }
 ```
+
+Restart Claude Desktop after editing. Then to list an item: keep its photos in a
+folder, **attach them to the chat** so Claude can see and describe them, and say
+*"list these — photos are in `C:\Users\YOU\vinted\item1`"*. Claude composes the
+listing and calls `vinted_create_draft` with that `photoDir`.
 
 Tools exposed:
 

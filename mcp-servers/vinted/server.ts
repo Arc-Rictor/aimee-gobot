@@ -20,7 +20,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { VintedClient } from "./vinted-client.js";
-import { ListingSchema, VINTED_CONDITIONS, VINTED_PARCEL_SIZES } from "./types.js";
+import { ListingSchema, DraftInputSchema, VINTED_CONDITIONS, VINTED_PARCEL_SIZES } from "./types.js";
+import { resolvePhotos } from "./photos.js";
 
 const server = new McpServer({ name: "vinted-uk", version: "1.0.0" });
 
@@ -81,15 +82,18 @@ server.registerTool(
     description:
       "Fill the vinted.co.uk 'List an item' form from photos + details and SAVE IT AS A DRAFT (never published automatically). " +
       "You (Claude) should analyse the supplied photos to compose the title, description, category path, condition, colours and a sensible GBP price, then call this. " +
-      "Returns a per-field report and a screenshot path for human review. Conditions: " +
+      "Returns a per-field report and a screenshot path for human review. " +
+      "Supply photos as explicit `photos` paths OR a `photoDir` folder. Conditions: " +
       VINTED_CONDITIONS.join(" | ") +
       ". Parcel sizes: " +
       VINTED_PARCEL_SIZES.join(" | ") +
       ".",
-    inputSchema: ListingSchema.shape,
+    inputSchema: DraftInputSchema.shape,
   },
   async (args) => {
-    const listing = ListingSchema.parse(args);
+    const input = DraftInputSchema.parse(args);
+    const photos = resolvePhotos({ photos: input.photos, photoDir: input.photoDir });
+    const listing = ListingSchema.parse({ ...input, photos });
     const client = new VintedClient({ headed: process.env.VINTED_HEADED === "1" });
     try {
       const result = await client.createDraft(listing);

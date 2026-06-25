@@ -20,11 +20,10 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from "fs";
-import { join, resolve, isAbsolute } from "path";
+import { join, resolve } from "path";
 import { VintedClient } from "../mcp-servers/vinted/vinted-client.js";
 import { ListingSchema, type Listing } from "../mcp-servers/vinted/types.js";
-
-const IMAGE_RE = /\.(jpe?g|png|webp|heic)$/i;
+import { resolvePhotos } from "../mcp-servers/vinted/photos.js";
 
 function loadListing(folder: string): Listing {
   const dir = resolve(folder);
@@ -32,16 +31,8 @@ function loadListing(folder: string): Listing {
   if (!existsSync(jsonPath)) throw new Error(`No item.json in ${dir}`);
   const raw = JSON.parse(readFileSync(jsonPath, "utf8"));
 
-  // Resolve photos: explicit list (relative to folder) or auto-glob the folder.
-  let photos: string[] = raw.photos;
-  if (!photos || !photos.length) {
-    photos = readdirSync(dir)
-      .filter((f) => IMAGE_RE.test(f))
-      .sort()
-      .map((f) => join(dir, f));
-  } else {
-    photos = photos.map((p: string) => (isAbsolute(p) ? p : join(dir, p)));
-  }
+  // Photos: explicit list in item.json, else auto-glob the item folder.
+  const photos = resolvePhotos({ photos: raw.photos, photoDir: dir });
   return ListingSchema.parse({ ...raw, photos });
 }
 

@@ -72,6 +72,21 @@ export const ListingSchema = z.object({
 
 export type Listing = z.infer<typeof ListingSchema>;
 
+/**
+ * Input shape for the MCP `create_draft` tool. Same as a Listing but photos may
+ * be given as a `photoDir` folder instead of explicit paths — handy when driving
+ * from Claude Desktop, where you'd rather name a folder than list every file.
+ * One of `photos` or `photoDir` is required; resolved into `photos` server-side.
+ */
+export const DraftInputSchema = ListingSchema.extend({
+  photos: z.array(z.string().min(1)).max(20).optional()
+    .describe("Explicit photo paths, in display order (first = cover). Omit if using photoDir."),
+  photoDir: z.string().optional()
+    .describe("Folder of photos to use automatically, sorted by filename. Alternative to listing photos."),
+});
+
+export type DraftInput = z.infer<typeof DraftInputSchema>;
+
 /** Per-field outcome reported back after a draft attempt, so the human review is informed. */
 export interface FieldResult {
   field: string;
