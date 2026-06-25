@@ -1,40 +1,25 @@
+# Dependencies
 node_modules/
-dist/
+bun.lock
+*.lock
+
+# Env + secrets
 .env
 .env.*
 !.env.example
-logs/
-obsidian/
-temp/
-uploads/
-*.lock
-bot.lock
-session-state.json
-memory.json
-checkin-state.json
-config/profile.md
-config/schedule.json
-config/gobot-patterns.md
-config/.google-tokens.json
-news-history.json
-last-processed-call.json
-meeting-actions-state.json
-bun.lock
-gobot-master/
-discord-bot.pid
-discord-bot-health.json
-session-state-discord.json
-briefing-state.json
-overnight-state.json
-reflection-state.json
-gobotbook-state.json
-ecosystem.config.cjs
-.claude/
 
 # Vinted connector runtime artifacts
 .vinted-shots/
+
+# Your real item photos (the example folder's text/json are tracked; images are not)
 listings/**/*.jpg
 listings/**/*.jpeg
 listings/**/*.png
 listings/**/*.webp
 listings/**/*.heic
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.claude/
