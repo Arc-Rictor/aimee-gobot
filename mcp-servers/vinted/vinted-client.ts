@@ -35,8 +35,35 @@ export class VintedClient {
 
   private async page(): Promise<Page> {
     if (!this.ctx) this.ctx = await launchContext({ headed: this.headed });
-    const pages = this.ctx.pages();
-    return pages.length ? pages[0] : await this.ctx.newPage();
+    // Reuse the window Chromium already opened (persistent context starts with
+    // one tab); only create a new page if somehow none exists. Driving the
+    // existing tab avoids leaving a stray about:blank window in front.
+    const existing = this.ctx.pages()[0];
+    const page = existing ?? (await this.ctx.newPage());
+    await page.bringToFront().catch(() => {});
+    return page;
+  }
+
+  /**
+   * Robust navigation. `domcontentloaded`/`load` can stall on Vinted (heavy SPA +
+   * anti-bot), leaving the tab on about:blank. We wait for `commit` instead — the
+   * URL changes as soon as the server responds — then let content settle. Logs the
+   * resulting URL so a stuck navigation is visible rather than silent.
+   */
+  private async navigate(page: Page, pathOrUrl: string): Promise<void> {
+    const url = pathOrUrl.startsWith("http") ? pathOrUrl : VINTED_BASE + pathOrUrl;
+    try {
+      await page.goto(url, { waitUntil: "commit", timeout: 60_000 });
+    } catch (e) {
+      if (DEBUG) console.error(`[vinted] goto(commit) failed: ${String(e).split("\n")[0]} — retrying`);
+      await page.goto(url, { waitUntil: "load", timeout: 60_000 }).catch(() => {});
+    }
+    // Best-effort settle; don't hang if a late subresource never finishes.
+    await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
+    if (page.url().startsWith("about:")) {
+      // Navigation didn't take — one more attempt.
+      await page.goto(url, { waitUntil: "commit", timeout: 60_000 }).catch(() => {});
+    }
   }
 
   async close(): Promise<void> {
@@ -74,7 +101,7 @@ export class VintedClient {
 
   async isLoggedIn(): Promise<boolean> {
     const page = await this.page();
-    await page.goto(VINTED_BASE + URLS.home, { waitUntil: "domcontentloaded" });
+    await this.navigate(page, URLS.home);
     await this.dismissCookieBanner(page);
     const signal = await this.firstVisible(page, LOGGED_IN_SIGNALS);
     return signal !== null;
@@ -109,13 +136,29 @@ export class VintedClient {
     if (this.ctx) await this.close();
     this.ctx = await launchContext({ headed: true });
     const page = await this.page();
-    await page.goto(VINTED_BASE + URLS.home, { waitUntil: "domcontentloaded" });
+
+    console.error(`[vinted] Opening ${VINTED_BASE} …`);
+    await this.navigate(page, URLS.home);
+    console.error(`[vinted] Page is now at: ${page.url()}`);
+    if (page.url().startsWith("about:")) {
+      console.error(
+        "[vinted] ⚠️  Still on about:blank — the page didn't load. Check your internet/VPN, " +
+          "or set VINTED_DEBUG=1 and try again. You can also just type the address into the open window."
+      );
+    }
     await this.dismissCookieBanner(page);
+    console.error(
+      `[vinted] Log in to Vinted in the browser window (solve any captcha). ` +
+        `Waiting up to ${Math.round(timeoutMs / 1000)}s for a logged-in session …`
+    );
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const signal = await this.firstVisible(page, LOGGED_IN_SIGNALS);
-      if (signal) return true;
+      if (signal) {
+        console.error("[vinted] ✅ Login detected — session saved.");
+        return true;
+      }
       await page.waitForTimeout(2000);
     }
     return false;
@@ -127,7 +170,7 @@ export class VintedClient {
     const fields: FieldResult[] = [];
     const page = await this.page();
 
-    await page.goto(VINTED_BASE + URLS.newItem, { waitUntil: "domcontentloaded" });
+    await this.navigate(page, URLS.newItem);
     await this.dismissCookieBanner(page);
 
     // Bail early with a clear message if Vinted bounced us to a login wall.
@@ -342,7 +385,7 @@ export class VintedClient {
   /** Publish a saved draft. Pass the draft URL (from createDraft). */
   async publishDraft(draftUrl: string): Promise<{ published: boolean; url?: string; detail?: string }> {
     const page = await this.page();
-    await page.goto(draftUrl, { waitUntil: "domcontentloaded" });
+    await this.navigate(page, draftUrl);
     await this.dismissCookieBanner(page);
     const btn = await this.firstVisible(page, ACTIONS.publish);
     if (!btn) return { published: false, detail: "Publish/Upload button not found on draft page." };
@@ -354,7 +397,7 @@ export class VintedClient {
   /** Return links to current drafts for review. */
   async listDrafts(): Promise<{ url: string; title: string }[]> {
     const page = await this.page();
-    await page.goto(VINTED_BASE + URLS.draftsHint, { waitUntil: "domcontentloaded" });
+    await this.navigate(page, URLS.draftsHint);
     await this.dismissCookieBanner(page);
     const items = page.locator('a[href*="/items/"]');
     const out: { url: string; title: string }[] = [];
