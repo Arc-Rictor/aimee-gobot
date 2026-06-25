@@ -77,7 +77,27 @@ Restart Claude after editing. Tools exposed:
 | `vinted_list_drafts` | List current drafts + URLs for review |
 | `vinted_publish` | Publish an approved draft live |
 
-### 2. Batch CLI — for scale / cron
+### 2. Photograph items on your phone (LAN upload)
+
+Photos are easiest to take on a phone, but the connector runs on the laptop. This
+bridges the two over your home Wi-Fi — no app, no cloud. On the laptop:
+
+```bash
+bun run vinted:upload
+```
+
+It prints a `http://<laptop-ip>:8787` URL. Open that on your phone (same Wi-Fi),
+type an item name, snap/select the photos, and tap **Upload** — they land in
+`listings/<item>/` on the laptop with a starter `item.json`. Then list it:
+
+```bash
+bun run vinted:list draft ./listings/<item>     # or tell Claude: "list listings/<item>"
+```
+
+Set `VINTED_UPLOAD_TOKEN=somesecret` to require `?token=` on the page, and
+`VINTED_UPLOAD_PORT` / `VINTED_LISTINGS_DIR` to change the port / destination.
+
+### 3. Batch CLI — for scale / cron
 
 Each item is a folder with photos + an `item.json` (schema = the `Listing` type
 in [`mcp-servers/vinted/types.ts`](mcp-servers/vinted/types.ts)). See

@@ -41,6 +41,7 @@ The `Listing` schema is the contract: `mcp-servers/vinted/types.ts`.
 | `mcp-servers/vinted/vinted-client.ts` | Playwright flow: login, draft, publish, list |
 | `mcp-servers/vinted/server.ts` | MCP server exposing the tools |
 | `scripts/vinted-list.ts` | Batch CLI (`bun run vinted:list …`) |
+| `scripts/vinted-upload-server.ts` | LAN web page to upload phone photos into `listings/` |
 | `setup/vinted-setup.ts` | One-command setup for a fresh machine |
 
 ## Commands
@@ -53,6 +54,7 @@ bun run vinted:list draft <folder>   # draft one item
 bun run vinted:list draft-all <dir>  # draft every subfolder
 bun run vinted:list drafts           # list current drafts
 bun run vinted:list publish <url>    # publish an approved draft
+bun run vinted:upload                # LAN photo-upload page (snap on phone → laptop)
 bun run vinted:mcp                   # run the MCP server (stdio)
 bun run typecheck                    # tsc --noEmit
 ```

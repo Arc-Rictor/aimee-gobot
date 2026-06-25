@@ -6,6 +6,7 @@
   "scripts": {
     "vinted:setup": "bun run setup/vinted-setup.ts",
     "vinted:list": "bun run scripts/vinted-list.ts",
+    "vinted:upload": "bun run scripts/vinted-upload-server.ts",
     "vinted:mcp": "bun run mcp-servers/vinted/server.ts",
     "typecheck": "tsc --noEmit"
   },
