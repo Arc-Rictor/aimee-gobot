@@ -70,6 +70,25 @@ async function main() {
       await client.close();
       process.exit(ok ? 0 : 1);
     }
+    case "cookies": {
+      // Diagnostic: show the Vinted cookies in the saved profile.
+      const client = new VintedClient();
+      const cookies = await client.dumpCookies();
+      await client.close();
+      if (!cookies.length) {
+        console.log("No Vinted cookies in the saved profile — log in first (vinted:list login).");
+      } else {
+        const authNames = cookies.filter((c) => c.auth).map((c) => c.name);
+        console.log(`${cookies.length} Vinted cookie(s):`);
+        for (const c of cookies) console.log(`   ${c.auth ? "🔑" : "  "} ${c.name}`);
+        console.log(
+          authNames.length
+            ? `\n✅ Auth cookie present (${authNames.join(", ")}) — session looks valid.`
+            : "\n❌ No access/refresh-token cookie found — not fully logged in (complete any 'Verify Info' step)."
+        );
+      }
+      break;
+    }
     case "draft": {
       if (!arg) throw new Error("Usage: vinted:list draft <folder>");
       const listing = loadListing(arg);
@@ -119,7 +138,7 @@ async function main() {
     }
     default:
       console.log(
-        "Commands: login | check | draft <folder> | draft-all <dir> | drafts | publish <url>"
+        "Commands: login | check | cookies | draft <folder> | draft-all <dir> | drafts | publish <url>"
       );
       process.exit(1);
   }

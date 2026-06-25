@@ -112,6 +112,15 @@ export class VintedClient {
     return cookies.some((c) => /^(access|refresh)_token/i.test(c.name) && !!c.value);
   }
 
+  /** Diagnostic: list Vinted cookie names in the saved profile and flag the auth one(s). */
+  async dumpCookies(): Promise<{ name: string; auth: boolean }[]> {
+    await this.page(); // load the persistent context (and its saved cookies)
+    const cookies = await this.ctx!.cookies(VINTED_BASE).catch(() => []);
+    return cookies
+      .map((c) => ({ name: c.name, auth: /^(access|refresh)_token/i.test(c.name) && !!c.value }))
+      .sort((a, b) => Number(b.auth) - Number(a.auth) || a.name.localeCompare(b.name));
+  }
+
   async isLoggedIn(): Promise<boolean> {
     await this.page(); // ensure the context (and its saved cookies) is loaded
     // Cookies persist in the profile, so we can often answer without navigating.
