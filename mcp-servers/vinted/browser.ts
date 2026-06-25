@@ -79,10 +79,10 @@ export async function launchContext(
     locale: opts.locale || "en-GB",
     timezoneId: opts.timezone || "Europe/London",
     viewport: { width: 1280, height: 900 },
-    // A real, current UA reduces (does not eliminate) anti-bot friction.
-    userAgent:
-      process.env.VINTED_USER_AGENT ||
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    // Use the browser's own user-agent by default. Overriding it with a mismatched
+    // string can make Vinted/Cloudflare hang or block; only set it if you know
+    // you need to (VINTED_USER_AGENT).
+    ...(process.env.VINTED_USER_AGENT ? { userAgent: process.env.VINTED_USER_AGENT } : {}),
     args: ["--disable-blink-features=AutomationControlled"],
   });
 

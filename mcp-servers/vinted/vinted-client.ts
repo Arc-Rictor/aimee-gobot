@@ -55,8 +55,10 @@ export class VintedClient {
     try {
       await page.goto(url, { waitUntil: "commit", timeout: 60_000 });
     } catch (e) {
-      if (DEBUG) console.error(`[vinted] goto(commit) failed: ${String(e).split("\n")[0]} — retrying`);
-      await page.goto(url, { waitUntil: "load", timeout: 60_000 }).catch(() => {});
+      console.error(`[vinted] navigation to ${url} stalled (${String(e).split("\n")[0]}) — retrying…`);
+      await page.goto(url, { waitUntil: "load", timeout: 60_000 }).catch((e2) =>
+        console.error(`[vinted] retry also failed: ${String(e2).split("\n")[0]}`)
+      );
     }
     // Best-effort settle; don't hang if a late subresource never finishes.
     await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {});
@@ -99,12 +101,27 @@ export class VintedClient {
 
   // ── session ──────────────────────────────────────────────────────────────
 
+  /**
+   * Authenticated when Vinted has set an access/refresh token cookie in the saved
+   * profile. This is the reliable signal — it doesn't depend on guessing which
+   * page elements appear when logged in, and it sees cookies set in any tab.
+   */
+  private async hasAuthCookie(): Promise<boolean> {
+    if (!this.ctx) return false;
+    const cookies = await this.ctx.cookies(VINTED_BASE).catch(() => []);
+    return cookies.some((c) => /^(access|refresh)_token/i.test(c.name) && !!c.value);
+  }
+
   async isLoggedIn(): Promise<boolean> {
+    await this.page(); // ensure the context (and its saved cookies) is loaded
+    // Cookies persist in the profile, so we can often answer without navigating.
+    if (await this.hasAuthCookie()) return true;
+    // Fallback: load the site, accept cookies, re-check, then look for logged-in UI.
     const page = await this.page();
     await this.navigate(page, URLS.home);
     await this.dismissCookieBanner(page);
-    const signal = await this.firstVisible(page, LOGGED_IN_SIGNALS);
-    return signal !== null;
+    if (await this.hasAuthCookie()) return true;
+    return (await this.firstVisible(page, LOGGED_IN_SIGNALS)) !== null;
   }
 
   private async dismissCookieBanner(page: Page): Promise<void> {
@@ -140,27 +157,31 @@ export class VintedClient {
     console.error(`[vinted] Opening ${VINTED_BASE} …`);
     await this.navigate(page, URLS.home);
     console.error(`[vinted] Page is now at: ${page.url()}`);
-    if (page.url().startsWith("about:")) {
-      console.error(
-        "[vinted] ⚠️  Still on about:blank — the page didn't load. Check your internet/VPN, " +
-          "or set VINTED_DEBUG=1 and try again. You can also just type the address into the open window."
-      );
-    }
-    await this.dismissCookieBanner(page);
+    const blank = page.url().startsWith("about:");
+    await this.dismissCookieBanner(page).catch(() => {});
     console.error(
-      `[vinted] Log in to Vinted in the browser window (solve any captcha). ` +
-        `Waiting up to ${Math.round(timeoutMs / 1000)}s for a logged-in session …`
+      "[vinted] 👉 Log in to Vinted in the open browser window" +
+        (blank ? " (type vinted.co.uk into the address bar first — it didn't load on its own)" : "") +
+        ", solving any captcha. I'll detect it automatically — keep this terminal running. " +
+        `Waiting up to ${Math.round(timeoutMs / 1000)}s …`
     );
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const signal = await this.firstVisible(page, LOGGED_IN_SIGNALS);
-      if (signal) {
+      // Primary signal: the auth cookie (works whatever tab/page you used).
+      if (await this.hasAuthCookie()) {
         console.error("[vinted] ✅ Login detected — session saved.");
         return true;
       }
-      await page.waitForTimeout(2000);
+      // Secondary: a logged-in element on the current front page.
+      const front = this.ctx?.pages()[0] ?? page;
+      if (await this.firstVisible(front, LOGGED_IN_SIGNALS).catch(() => null)) {
+        console.error("[vinted] ✅ Login detected — session saved.");
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 2500));
     }
+    console.error("[vinted] ⌛ Timed out — no logged-in session detected.");
     return false;
   }
 
