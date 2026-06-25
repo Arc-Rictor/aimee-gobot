@@ -30,3 +30,11 @@ reflection-state.json
 gobotbook-state.json
 ecosystem.config.cjs
 .claude/
+
+# Vinted connector runtime artifacts
+.vinted-shots/
+listings/**/*.jpg
+listings/**/*.jpeg
+listings/**/*.png
+listings/**/*.webp
+listings/**/*.heic

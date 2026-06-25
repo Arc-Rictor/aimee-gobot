@@ -28,7 +28,10 @@
     "migrate:convex": "bun run scripts/migrate-to-convex.ts",
     "uninstall": "bun run setup/uninstall.ts",
     "upgrade": "bun run setup/upgrade.ts",
-    "feedback": "bun run src/feedback.ts"
+    "feedback": "bun run src/feedback.ts",
+    "vinted:setup": "bun run setup/vinted-setup.ts",
+    "vinted:list": "bun run scripts/vinted-list.ts",
+    "vinted:mcp": "bun run mcp-servers/vinted/server.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.54",
@@ -39,6 +42,7 @@
     "convex": "^1.32.0",
     "discord.js": "^14.25.1",
     "grammy": "^1.35.0",
+    "playwright": "^1.61.1",
     "zod": "^3.24.0"
   },
   "devDependencies": {

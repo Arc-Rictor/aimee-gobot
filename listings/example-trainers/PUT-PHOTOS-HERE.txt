@@ -1,0 +1,16 @@
+Drop this item's photos in THIS folder (jpg / png / webp).
+
+Name them so they sort in the order you want them shown, e.g.:
+  01-front.jpg
+  02-side.jpg
+  03-sole.jpg
+  04-flaw-left-toe.jpg
+
+The first photo (alphabetically) becomes the Vinted cover image.
+
+You can either:
+  • leave "photos": [] in item.json and the connector picks up every image
+    in this folder automatically, OR
+  • list exact filenames in "photos" to override.
+
+Delete this .txt file once you've added real photos (it's harmless if left).
