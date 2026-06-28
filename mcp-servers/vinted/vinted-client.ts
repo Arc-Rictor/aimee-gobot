@@ -111,23 +111,32 @@ export class VintedClient {
   // too, so they'd give a false "logged in".
   private static AUTH_COOKIE_RE = /(access|refresh)_token/i;
 
+  /**
+   * All Vinted cookies in the context, regardless of exact domain
+   * (vinted.co.uk vs www.vinted.co.uk). We read the whole jar and filter by the
+   * "vinted" domain ourselves — a URL filter would miss apex-domain host-only
+   * cookies and silently fail to detect the session.
+   */
+  private async vintedCookies(): Promise<{ name: string; value: string; domain: string }[]> {
+    if (!this.ctx) return [];
+    const all = await this.ctx.cookies().catch(() => []);
+    return all.filter((c) => /vinted/i.test(c.domain));
+  }
+
   private async hasAuthCookie(): Promise<boolean> {
-    if (!this.ctx) return false;
-    const cookies = await this.ctx.cookies(VINTED_BASE).catch(() => []);
+    const cookies = await this.vintedCookies();
     return cookies.some((c) => VintedClient.AUTH_COOKIE_RE.test(c.name) && !!c.value);
   }
 
   /** Just the Vinted cookie names currently in the context (for diagnostics). */
   private async cookieNames(): Promise<string[]> {
-    if (!this.ctx) return [];
-    const cookies = await this.ctx.cookies(VINTED_BASE).catch(() => []);
-    return cookies.map((c) => c.name);
+    return (await this.vintedCookies()).map((c) => c.name);
   }
 
   /** Diagnostic: list Vinted cookie names in the saved profile and flag the auth one(s). */
   async dumpCookies(): Promise<{ name: string; auth: boolean }[]> {
     await this.page(); // load the persistent context (and its saved cookies)
-    const cookies = await this.ctx!.cookies(VINTED_BASE).catch(() => []);
+    const cookies = await this.vintedCookies();
     return cookies
       .map((c) => ({ name: c.name, auth: VintedClient.AUTH_COOKIE_RE.test(c.name) && !!c.value }))
       .sort((a, b) => Number(b.auth) - Number(a.auth) || a.name.localeCompare(b.name));
