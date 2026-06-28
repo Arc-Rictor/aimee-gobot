@@ -106,10 +106,22 @@ export class VintedClient {
    * profile. This is the reliable signal — it doesn't depend on guessing which
    * page elements appear when logged in, and it sees cookies set in any tab.
    */
+  // Match the access/refresh token cookie (unanchored, in case Vinted prefixes the
+  // name). NOT session cookies like _vinted_fr_session — those exist when logged out
+  // too, so they'd give a false "logged in".
+  private static AUTH_COOKIE_RE = /(access|refresh)_token/i;
+
   private async hasAuthCookie(): Promise<boolean> {
     if (!this.ctx) return false;
     const cookies = await this.ctx.cookies(VINTED_BASE).catch(() => []);
-    return cookies.some((c) => /^(access|refresh)_token/i.test(c.name) && !!c.value);
+    return cookies.some((c) => VintedClient.AUTH_COOKIE_RE.test(c.name) && !!c.value);
+  }
+
+  /** Just the Vinted cookie names currently in the context (for diagnostics). */
+  private async cookieNames(): Promise<string[]> {
+    if (!this.ctx) return [];
+    const cookies = await this.ctx.cookies(VINTED_BASE).catch(() => []);
+    return cookies.map((c) => c.name);
   }
 
   /** Diagnostic: list Vinted cookie names in the saved profile and flag the auth one(s). */
@@ -117,7 +129,7 @@ export class VintedClient {
     await this.page(); // load the persistent context (and its saved cookies)
     const cookies = await this.ctx!.cookies(VINTED_BASE).catch(() => []);
     return cookies
-      .map((c) => ({ name: c.name, auth: /^(access|refresh)_token/i.test(c.name) && !!c.value }))
+      .map((c) => ({ name: c.name, auth: VintedClient.AUTH_COOKIE_RE.test(c.name) && !!c.value }))
       .sort((a, b) => Number(b.auth) - Number(a.auth) || a.name.localeCompare(b.name));
   }
 
@@ -176,6 +188,8 @@ export class VintedClient {
     );
 
     const deadline = Date.now() + timeoutMs;
+    let lastNames = "";
+    let ticks = 0;
     while (Date.now() < deadline) {
       // Primary signal: the auth cookie (works whatever tab/page you used).
       if (await this.hasAuthCookie()) {
@@ -188,9 +202,19 @@ export class VintedClient {
         console.error("[vinted] ✅ Login detected — session saved.");
         return true;
       }
+      // Surface the cookie names we can see, so a name mismatch is visible live.
+      // Print whenever the set changes, and at least every ~15s.
+      const names = (await this.cookieNames()).sort();
+      const joined = names.join(", ");
+      if (names.length && (joined !== lastNames || ticks % 6 === 0)) {
+        console.error(`[vinted] cookies so far: ${joined || "(none)"}`);
+        lastNames = joined;
+      }
+      ticks++;
       await new Promise((r) => setTimeout(r, 2500));
     }
     console.error("[vinted] ⌛ Timed out — no logged-in session detected.");
+    console.error(`[vinted] Final cookies seen: ${lastNames || "(none)"}`);
     return false;
   }
 
