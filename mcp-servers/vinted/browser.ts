@@ -83,7 +83,16 @@ export async function launchContext(
     // string can make Vinted/Cloudflare hang or block; only set it if you know
     // you need to (VINTED_USER_AGENT).
     ...(process.env.VINTED_USER_AGENT ? { userAgent: process.env.VINTED_USER_AGENT } : {}),
-    args: ["--disable-blink-features=AutomationControlled"],
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      // Quiet down Chrome's own stderr noise (USB / GCM / GPU spam) so our
+      // [vinted] log lines are readable in the terminal.
+      "--log-level=3",
+      "--disable-logging",
+      "--disable-gpu",
+      "--disable-features=Translate,OptimizationHints",
+      "--password-store=basic",
+    ],
   });
 
   context.setDefaultTimeout(45_000);

@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import type { BrowserContext, Page, Locator } from "playwright";
-import { launchContext, VINTED_BASE } from "./browser.js";
+import { launchContext, resolveChromium, profileDir, VINTED_BASE } from "./browser.js";
 import { URLS, LOGGED_IN_SIGNALS, FORM, PICKER, ACTIONS } from "./selectors.js";
 import type { Listing, DraftResult, FieldResult } from "./types.js";
 
@@ -140,6 +140,36 @@ export class VintedClient {
     return cookies
       .map((c) => ({ name: c.name, auth: VintedClient.AUTH_COOKIE_RE.test(c.name) && !!c.value }))
       .sort((a, b) => Number(b.auth) - Number(a.auth) || a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Print a clean, self-contained diagnosis (headless, no noisy window):
+   * which browser is used, whether navigation reaches Vinted, and what cookies
+   * (if any) the saved profile holds. This is what to run when login misbehaves.
+   */
+  async diagnose(): Promise<void> {
+    console.log("── Vinted connector doctor ─────────────────────────────");
+    console.log(`Chromium binary : ${resolveChromium() ?? "(Playwright bundled default)"}`);
+    console.log(`Profile dir     : ${profileDir()}`);
+    console.log(`Target site     : ${VINTED_BASE}`);
+    console.log("Launching headless browser and loading Vinted…");
+    const page = await this.page();
+    await this.navigate(page, URLS.home);
+    console.log(`Reached URL     : ${page.url()}`);
+    console.log(`Page title      : ${await page.title().catch(() => "(none)")}`);
+    const names = await this.cookieNames();
+    console.log(`Vinted cookies  : ${names.length ? names.sort().join(", ") : "(none)"}`);
+    console.log(`Auth cookie     : ${(await this.hasAuthCookie()) ? "✅ present — logged in" : "❌ not found — not logged in"}`);
+    const reached = /vinted/i.test(page.url());
+    console.log("────────────────────────────────────────────────────────");
+    if (!reached) {
+      console.log("⚠️  The headless browser couldn't reach vinted.co.uk — this points to a");
+      console.log("    network/VPN/firewall block rather than the connector. Try opening");
+      console.log("    vinted.co.uk in a normal browser on this laptop to confirm access.");
+    } else if (!names.length) {
+      console.log("ℹ️  Reached Vinted but no session cookies yet — run `vinted:list login`");
+      console.log("    and complete login INSIDE the 'Chrome for Testing' window it opens.");
+    }
   }
 
   async isLoggedIn(): Promise<boolean> {

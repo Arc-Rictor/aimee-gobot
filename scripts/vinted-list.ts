@@ -70,6 +70,12 @@ async function main() {
       await client.close();
       process.exit(ok ? 0 : 1);
     }
+    case "doctor": {
+      const client = new VintedClient(); // headless — clean output
+      await client.diagnose();
+      await client.close();
+      break;
+    }
     case "cookies": {
       // Diagnostic: show the Vinted cookies in the saved profile.
       const client = new VintedClient();
@@ -138,7 +144,7 @@ async function main() {
     }
     default:
       console.log(
-        "Commands: login | check | cookies | draft <folder> | draft-all <dir> | drafts | publish <url>"
+        "Commands: login | check | doctor | cookies | draft <folder> | draft-all <dir> | drafts | publish <url>"
       );
       process.exit(1);
   }
