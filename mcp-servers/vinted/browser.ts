@@ -107,6 +107,16 @@ export async function launchContext(
     );
   }
 
+  // When run under tsx/esbuild (which we do, because Playwright can't drive a
+  // browser under bun), esbuild's keepNames rewrites our page.evaluate callbacks
+  // to call a `__name` helper that only exists in Node — not the browser — so
+  // they throw "ReferenceError: __name is not defined". Define a no-op shim in
+  // every page/frame before any script runs. Harmless under other runtimes.
+  await context.addInitScript(() => {
+    const g = globalThis as Record<string, unknown>;
+    if (typeof g.__name === "undefined") g.__name = (fn: unknown) => fn;
+  });
+
   context.setDefaultTimeout(45_000);
   return context;
 }

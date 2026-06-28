@@ -14,7 +14,7 @@ import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import type { BrowserContext, Page, Locator } from "playwright";
 import { launchContext, resolveChromium, profileDir, VINTED_BASE } from "./browser.js";
-import { URLS, LOGGED_IN_SIGNALS, FORM, PICKER, ACTIONS } from "./selectors.js";
+import { URLS, LOGGED_IN_SIGNALS, FORM, CATEGORY, PICKERS, PACKAGE, ACTIONS } from "./selectors.js";
 import type { Listing, DraftResult, FieldResult } from "./types.js";
 
 const DEBUG = process.env.VINTED_DEBUG === "1";
@@ -23,6 +23,38 @@ function shotDir(): string {
   const dir = process.env.VINTED_SHOT_DIR || join(process.cwd(), ".vinted-shots");
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Size-label variants to try in the size grid. The grid shows bare sizes like
+ * "9", while a listing may say "UK 9" — so we also try the value with a common
+ * region prefix stripped, and the final token. e.g. "UK 9" → ["UK 9", "9"].
+ */
+function sizeVariants(value: string): string[] {
+  const out = [value];
+  const stripped = value.replace(/^\s*(uk|eu|us|eur|eu\/uk)\s*/i, "").trim();
+  if (stripped && !out.includes(stripped)) out.push(stripped);
+  const lastTok = value.split(/\s+/).pop() || "";
+  if (lastTok && !out.includes(lastTok)) out.push(lastTok);
+  return out;
+}
+
+/** Pull a human-readable message out of a Vinted API error body (best effort). */
+function extractApiError(body: string): string {
+  try {
+    const j = JSON.parse(body) as Record<string, unknown>;
+    if (typeof j.message === "string" && j.message) return j.message;
+    if (typeof j.error === "string" && j.error) return j.error;
+    const errs = j.errors;
+    if (Array.isArray(errs) && errs.length)
+      return errs
+        .map((e) => (e && typeof e === "object" ? (e as any).value || (e as any).message || (e as any).field : String(e)))
+        .filter(Boolean)
+        .join("; ");
+  } catch {
+    /* body wasn't JSON */
+  }
+  return body.replace(/\s+/g, " ").slice(0, 140);
 }
 
 export class VintedClient {
@@ -266,23 +298,26 @@ export class VintedClient {
     await this.navigate(page, URLS.newItem);
     await this.dismissCookieBanner(page);
 
-    // Bail early with a clear message if Vinted bounced us to a login wall.
-    if (!(await this.firstVisible(page, LOGGED_IN_SIGNALS))) {
-      const onForm = await this.firstVisible(page, FORM.photoInput);
-      if (!onForm) {
-        const shot = await this.snap(page, "not-logged-in");
-        return {
-          saved: false,
-          screenshotPath: shot,
-          fields,
-          summary:
-            "Not logged in (or hit an anti-bot wall). Run the `vinted_login` tool / `vinted-list login` first.",
-        };
-      }
+    // The sell form is a heavy SPA that starts as a spinner. Wait for it to
+    // actually render before touching fields — checking too early is what used
+    // to give a false "not logged in".
+    const ready = await this.waitForForm(page);
+    if (!ready) {
+      const loggedIn = await this.firstVisible(page, LOGGED_IN_SIGNALS);
+      const shot = await this.snap(page, loggedIn ? "form-not-ready" : "not-logged-in");
+      return {
+        saved: false,
+        screenshotPath: shot,
+        fields,
+        summary: loggedIn
+          ? "Reached Vinted logged in, but the 'Sell an item' form didn't finish loading in time. Try again (run headed to watch)."
+          : "Not logged in (or hit an anti-bot wall). Run the `vinted_login` tool / `vinted:list login` first.",
+      };
     }
 
-    // 1) Photos — do these first; Vinted often gates other fields until ≥1 photo.
+    // 1) Photos first — Vinted gates the rest of the form until ≥1 photo.
     fields.push(await this.uploadPhotos(page, listing.photos));
+    await page.waitForTimeout(1500);
 
     // 2) Free-text fields.
     fields.push(await this.fillText(page, "title", FORM.title.css, FORM.title.byLabel, listing.title));
@@ -290,39 +325,72 @@ export class VintedClient {
       await this.fillText(page, "description", FORM.description.css, FORM.description.byLabel, listing.description)
     );
 
-    // 3) Pickers.
-    fields.push(await this.pickPath(page, "category", FORM.categoryTrigger, listing.category));
-    fields.push(await this.pickValue(page, "condition", FORM.conditionTrigger, [listing.condition]));
-    if (listing.brand) fields.push(await this.pickValue(page, "brand", FORM.brandTrigger, [listing.brand]));
-    if (listing.size) fields.push(await this.pickValue(page, "size", FORM.sizeTrigger, [listing.size]));
-    if (listing.colors?.length)
-      fields.push(await this.pickValue(page, "colour", FORM.colorTrigger, listing.colors));
-    if (listing.material)
-      fields.push(await this.pickValue(page, "material", FORM.materialTrigger, [listing.material]));
-    fields.push(await this.pickValue(page, "parcelSize", FORM.parcelTrigger, [listing.parcelSize], true));
+    // 3) Category — selecting it reveals the attribute fields (brand/size/…).
+    fields.push(await this.selectCategory(page, listing.category));
+    await page.waitForTimeout(1200);
 
-    // 4) Price (text input, GBP).
+    // 4) Attribute pickers (only present once a category is chosen). Fill them in
+    //    the form's visual top-to-bottom order (brand, size, condition, colour,
+    //    material) so each is reached fresh — jumping around the form could scroll
+    //    a trigger under the sticky header and swallow its click.
+    if (listing.brand) fields.push(await this.pickOptions(page, "brand", FORM.brandTrigger, PICKERS.brand, [listing.brand]));
+    if (listing.size) fields.push(await this.pickOptions(page, "size", FORM.sizeTrigger, PICKERS.size, [listing.size], true));
+    fields.push(await this.pickOptions(page, "condition", FORM.conditionTrigger, PICKERS.condition, [listing.condition]));
+    if (listing.colors?.length)
+      fields.push(await this.pickOptions(page, "colour", FORM.colorTrigger, PICKERS.color, listing.colors));
+    if (listing.material)
+      fields.push(await this.pickOptions(page, "material", FORM.materialTrigger, PICKERS.material, [listing.material]));
+    fields.push(await this.selectPackageSize(page, listing.parcelSize));
+
+    // 5) Price (text input, GBP).
     fields.push(
       await this.fillText(page, "price", FORM.price.css, FORM.price.byLabel, String(listing.price))
     );
 
-    // 5) Save as a DRAFT (never publish here).
+    // 6) Save as a DRAFT (never publish here). A button click "working" does NOT
+    //    mean the draft saved — Vinted validates server-side and can reject it
+    //    (e.g. HTTP 400 "Title contains too many symbol characters"). So we watch
+    //    the real POST /api/v2/item_upload/drafts response and report its outcome
+    //    instead of assuming success.
     const saveBtn = await this.firstVisible(page, ACTIONS.saveDraft);
     let saved = false;
-    if (saveBtn) {
-      try {
-        await saveBtn.click();
-        await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-        saved = true;
-      } catch (e) {
-        fields.push({ field: "saveDraft", status: "failed", detail: String(e).slice(0, 200) });
-      }
-    } else {
+    let draftUrl: string | undefined;
+    if (!saveBtn) {
       fields.push({
         field: "saveDraft",
         status: "skipped",
         detail: "No 'Save as draft' button found — left form filled but unsaved for manual review.",
       });
+    } else {
+      const respPromise = page
+        .waitForResponse(
+          (r) => /\/api\/v2\/item_upload\/drafts/.test(r.url()) && r.request().method() === "POST",
+          { timeout: 20000 }
+        )
+        .catch(() => null);
+      try {
+        await saveBtn.click();
+      } catch (e) {
+        fields.push({ field: "saveDraft", status: "failed", detail: `Save button click failed: ${String(e).slice(0, 150)}` });
+      }
+      const resp = await respPromise;
+      if (!resp) {
+        fields.push({ field: "saveDraft", status: "failed", detail: "No draft-save response from Vinted — the draft was NOT saved." });
+      } else if (resp.status() >= 200 && resp.status() < 300) {
+        saved = true;
+        const id = await resp.json().then((j: any) => j?.item?.id ?? j?.draft?.id ?? j?.id).catch(() => undefined);
+        // A successful save redirects to the member profile; let it settle.
+        await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+        draftUrl = id ? `${VINTED_BASE}/items/${id}` : page.url();
+        fields.push({ field: "saveDraft", status: "ok", detail: `draft saved (HTTP ${resp.status()})` });
+      } else {
+        const msg = await resp.text().then((t) => extractApiError(t)).catch(() => "");
+        fields.push({
+          field: "saveDraft",
+          status: "failed",
+          detail: `Vinted rejected the draft (HTTP ${resp.status()})${msg ? `: ${msg}` : ""}`,
+        });
+      }
     }
 
     const screenshotPath = await this.snap(page, saved ? "draft-saved" : "draft-review");
@@ -331,7 +399,7 @@ export class VintedClient {
 
     return {
       saved,
-      draftUrl: saved ? page.url() : undefined,
+      draftUrl,
       screenshotPath,
       fields,
       summary:
@@ -340,7 +408,7 @@ export class VintedClient {
           .join(", ")}` : ""}. ` +
         (saved
           ? "Saved as draft — review the screenshot, then publish with `vinted_publish`."
-          : "NOT saved — open Vinted and finish/save manually, then review."),
+          : "NOT saved — see the 'saveDraft' detail (often a field Vinted rejected, e.g. a symbol-heavy title); fix and retry."),
     };
   }
 
@@ -386,43 +454,205 @@ export class VintedClient {
     }
   }
 
-  /** Open a picker and select one or more values by visible text. */
-  private async pickValue(
+  /**
+   * Wait for the SPA "Sell an item" form to mount (it starts as a spinner). The
+   * hidden photo input appears in the DOM once the form is ready — checking
+   * fields before this is what used to give a false "not logged in".
+   */
+  private async waitForForm(page: Page): Promise<boolean> {
+    for (const sel of FORM.formReady) {
+      const ok = await page
+        .waitForSelector(sel, { state: "attached", timeout: 30_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (ok) {
+        await page.waitForTimeout(1200); // let the rest of the form settle
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Click a picker trigger to open its dropdown/list/grid; returns the trigger. */
+  private async openTrigger(page: Page, trigger: string[]): Promise<Locator | null> {
+    const trig = await this.firstVisible(page, trigger);
+    if (!trig) return null;
+    // Playwright's click auto-scrolls and waits for actionability. If a click is
+    // intercepted (e.g. by the sticky header) it throws — log that rather than
+    // swallow it, since a silently-missed click looks like an empty dropdown.
+    try {
+      await trig.click({ timeout: 8000 });
+    } catch (e) {
+      // A blocked click (e.g. a prior dropdown's overlay still covering the form)
+      // throws here — fail fast and log rather than hang for the full timeout.
+      if (DEBUG) console.error(`[vinted] openTrigger click failed: ${String(e).split("\n")[0]}`);
+    }
+    await page.waitForTimeout(800);
+    return trig;
+  }
+
+  /**
+   * Category picker: type the leaf into the dropdown's search box, then click the
+   * result row whose path matches. Result rows read "<Leaf><Parents>", e.g.
+   * "TrainersMen > Shoes", so we match leaf + the parent chain (this disambiguates
+   * e.g. Men vs Women Trainers, which a naive substring match would not).
+   */
+  private async selectCategory(page: Page, path: string[]): Promise<FieldResult> {
+    const field = "category";
+    try {
+      if (!(await this.openTrigger(page, FORM.categoryTrigger)))
+        return { field, status: "failed", detail: "category trigger not found" };
+      const leaf = path[path.length - 1];
+      const search = await this.firstVisible(page, CATEGORY.searchInput);
+      if (!search) return { field, status: "failed", detail: "category search box not found" };
+      await search.fill(leaf);
+      await page.waitForTimeout(1200);
+
+      const matched = await page.evaluate(
+        ({ rowCss, fullPath }) => {
+          const norm = (s: string | null) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+          const vis = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+          };
+          const rows = [...document.querySelectorAll(rowCss)].filter(vis);
+          const leafLabel = fullPath[fullPath.length - 1];
+          const parents = fullPath.slice(0, -1).join(" > ");
+          const want = norm(leafLabel + parents);
+          let m =
+            rows.find((e) => norm(e.textContent) === want) ||
+            (parents
+              ? rows.find((e) => {
+                  const t = norm(e.textContent);
+                  return t.startsWith(norm(leafLabel)) && t.slice(norm(leafLabel).length).trim().startsWith(norm(fullPath[0]));
+                })
+              : undefined) ||
+            rows.find((e) => norm(e.textContent).includes(norm(leafLabel)));
+          if (m) {
+            (m as HTMLElement).click();
+            return (m.textContent || "").trim().slice(0, 60);
+          }
+          return null;
+        },
+        { rowCss: CATEGORY.resultRow, fullPath: path }
+      );
+      await page.waitForTimeout(1500);
+      if (!matched) return { field, status: "failed", detail: `no result matched ${path.join(" › ")}` };
+      return { field, status: "ok", detail: `matched "${matched}"` };
+    } catch (e) {
+      return { field, status: "failed", detail: String(e).slice(0, 200) };
+    }
+  }
+
+  /**
+   * In the currently-open picker, click the first visible option matching a
+   * candidate — exact text first, then startsWith (so "Good" never grabs "Very
+   * good"). Returns the clicked option's text, or null if nothing matched.
+   */
+  private async clickOption(page: Page, optionCss: string, candidates: string[]): Promise<string | null> {
+    return await page
+      .evaluate(
+        ({ css, cands }) => {
+          const norm = (s: string | null) => (s || "").trim().replace(/\s+/g, " ").toLowerCase();
+          const vis = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+          };
+          const els = [...document.querySelectorAll(css)].filter(vis);
+          for (const c of cands) {
+            const m = els.find((e) => norm(e.textContent) === norm(c));
+            if (m) { (m as HTMLElement).click(); return (m.textContent || "").trim().slice(0, 40); }
+          }
+          for (const c of cands) {
+            const m = els.find((e) => norm(e.textContent).startsWith(norm(c)));
+            if (m) { (m as HTMLElement).click(); return (m.textContent || "").trim().slice(0, 40); }
+          }
+          return null;
+        },
+        { css: optionCss, cands: candidates }
+      )
+      .catch(() => null);
+  }
+
+  /**
+   * Generic option picker for condition/brand/size/colour/material. Opens the
+   * trigger, optionally types into an in-dropdown search box, then clicks the
+   * option whose visible text matches — exact first, then startsWith, so "Good"
+   * does not grab "Very good". `sizeNormalize` also tries the size without a
+   * "UK "/"EU "/"US " prefix (the grid shows "9", not "UK 9").
+   */
+  private async pickOptions(
     page: Page,
     field: string,
     trigger: string[],
+    picker: { optionCss: string; search: string[]; multi: boolean },
     values: string[],
-    optional = false
+    sizeNormalize = false
   ): Promise<FieldResult> {
     try {
-      const trig = await this.firstVisible(page, trigger);
-      if (!trig)
-        return { field, status: optional ? "skipped" : "failed", detail: "trigger not found" };
-      await trig.click();
-      await page.waitForTimeout(600);
+      const trig = await this.openTrigger(page, trigger);
+      if (!trig) return { field, status: "failed", detail: "trigger not found" };
+      // Wait for the picker's options to actually render before matching.
+      await page.waitForSelector(picker.optionCss, { state: "visible", timeout: 4000 }).catch(() => {});
 
       const picked: string[] = [];
       for (const value of values) {
-        // Type into the picker's search box if present (helps long lists).
-        const search = await this.firstVisible(page, PICKER.searchInput);
-        if (search) {
-          await search.fill(value);
-          await page.waitForTimeout(500);
+        const candidates = sizeNormalize ? sizeVariants(value) : [value];
+        // 1) Match from the options already shown. The popular-brands list (and
+        //    the full lists for size/colour/material) usually already contains the
+        //    target, so we avoid typing — which on a remote-backed search (brand)
+        //    clears the list into an empty gap before results load.
+        let clicked = await this.clickOption(page, picker.optionCss, candidates);
+        // 2) Not shown? If the picker has a search box, type to filter, wait for
+        //    fresh results to render, then retry. (Never type into the trigger —
+        //    it's read-only and .fill() would hang for the full timeout.)
+        if (!clicked && picker.search.length) {
+          const search = await this.firstVisible(page, picker.search);
+          if (search) {
+            await search.fill(value).catch(() => {});
+            await page.waitForTimeout(900);
+            await page.waitForSelector(picker.optionCss, { state: "visible", timeout: 6000 }).catch(() => {});
+            await page.waitForTimeout(300);
+            clicked = await this.clickOption(page, picker.optionCss, candidates);
+          }
         }
-        const option = await this.firstVisible(page, PICKER.option(value));
-        if (option) {
-          await option.click();
+        if (clicked) {
           picked.push(value);
-          await page.waitForTimeout(400);
+          await page.waitForTimeout(500);
         }
       }
 
-      // Confirm multi-select drawers if a confirm button exists.
-      const confirm = await this.firstVisible(page, PICKER.confirm);
-      if (confirm) await confirm.click().catch(() => {});
+      // On failure, snapshot the picker's options BEFORE closing it — this is the
+      // quickest way to see what to fix in selectors.ts when Vinted changes a
+      // field. (DEBUG only; run with VINTED_DEBUG=1.)
+      if (!picked.length && DEBUG) {
+        const diag = await page
+          .evaluate((css) => {
+            const vis = (el: Element) => {
+              const r = el.getBoundingClientRect();
+              const s = getComputedStyle(el);
+              return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+            };
+            const all = [...document.querySelectorAll(css)];
+            const v = all.filter(vis);
+            return { total: all.length, visible: v.length, samples: v.slice(0, 8).map((e) => (e.textContent || "").trim().slice(0, 25)) };
+          }, picker.optionCss)
+          .catch(() => null);
+        const shot = await this.snap(page, `pick-fail-${field}`);
+        console.error(`[vinted] ${field}: no match for [${values.join(", ")}] — options ${JSON.stringify(diag)} shot=${shot}`);
+      }
 
-      if (!picked.length)
-        return { field, status: "failed", detail: `none of [${values.join(", ")}] matched` };
+      // Always dismiss the dropdown before the next field — an open overlay can
+      // swallow the next trigger's click and cascade failures down the form. The
+      // brand search dropdown ignores Escape, so also click in the page margin
+      // (a click-outside) to force it closed.
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.mouse.click(8, 400).catch(() => {});
+      await page.waitForTimeout(400);
+
+      if (!picked.length) return { field, status: "failed", detail: `none of [${values.join(", ")}] matched` };
       return {
         field,
         status: picked.length === values.length ? "ok" : "failed",
@@ -433,41 +663,28 @@ export class VintedClient {
     }
   }
 
-  /** Walk a hierarchical picker (category) level by level. */
-  private async pickPath(
-    page: Page,
-    field: string,
-    trigger: string[],
-    path: string[]
-  ): Promise<FieldResult> {
+  /** Parcel size is three cells (Small / Medium / Large); click the matching one. */
+  private async selectPackageSize(page: Page, size: string): Promise<FieldResult> {
+    const field = "parcelSize";
     try {
-      const trig = await this.firstVisible(page, trigger);
-      if (!trig) return { field, status: "failed", detail: "trigger not found" };
-      await trig.click();
-      await page.waitForTimeout(600);
-
-      const walked: string[] = [];
-      for (const level of path) {
-        const search = await this.firstVisible(page, PICKER.searchInput);
-        if (search) {
-          await search.fill(level);
-          await page.waitForTimeout(500);
-        }
-        const option = await this.firstVisible(page, PICKER.option(level));
-        if (!option) break;
-        await option.click();
-        walked.push(level);
-        await page.waitForTimeout(500);
-      }
-
-      const confirm = await this.firstVisible(page, PICKER.confirm);
-      if (confirm) await confirm.click().catch(() => {});
-
-      return {
-        field,
-        status: walked.length === path.length ? "ok" : "failed",
-        detail: `walked: ${walked.join(" › ") || "(none)"}`,
-      };
+      const word = PACKAGE.word[size] || PACKAGE.word.small;
+      const clicked = await page.evaluate(
+        ({ cellCss, sizeWord }) => {
+          const vis = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+          };
+          const cells = [...document.querySelectorAll(cellCss)].filter(vis);
+          const m = cells.find((e) => (e.textContent || "").toLowerCase().includes(sizeWord.toLowerCase()));
+          if (m) { (m as HTMLElement).click(); return true; }
+          return false;
+        },
+        { cellCss: PACKAGE.cell, sizeWord: word }
+      );
+      if (!clicked) return { field, status: "skipped", detail: `no '${word}' package cell found` };
+      await page.waitForTimeout(400);
+      return { field, status: "ok", detail: `selected ${word}` };
     } catch (e) {
       return { field, status: "failed", detail: String(e).slice(0, 200) };
     }
@@ -487,20 +704,71 @@ export class VintedClient {
     return { published: true, url: page.url() };
   }
 
-  /** Return links to current drafts for review. */
+  /**
+   * Return links to current drafts. Drafts live on the signed-in member's
+   * profile under the "Drafts" filter, as item cards linking to /items/<id>/edit.
+   */
   async listDrafts(): Promise<{ url: string; title: string }[]> {
     const page = await this.page();
-    await this.navigate(page, URLS.draftsHint);
+    const profileHref = await this.memberProfileHref(page);
+    if (DEBUG) console.error(`[vinted] listDrafts: profile href = ${profileHref}`);
+    if (!profileHref) return [];
+    await this.navigate(page, profileHref);
     await this.dismissCookieBanner(page);
-    const items = page.locator('a[href*="/items/"]');
-    const out: { url: string; title: string }[] = [];
-    const n = Math.min(await items.count(), 50);
-    for (let i = 0; i < n; i++) {
-      const a = items.nth(i);
-      const href = await a.getAttribute("href");
-      const title = (await a.getAttribute("title")) || (await a.innerText().catch(() => "")) || "(untitled)";
-      if (href) out.push({ url: href.startsWith("http") ? href : VINTED_BASE + href, title: title.trim() });
+    await page.waitForTimeout(2500); // let the wardrobe items render
+    // Switch the wardrobe to the Drafts filter.
+    const draftsTab = await this.firstVisible(page, [
+      '[data-testid="closet-seller-filters-draft"]',
+      'button:has-text("Drafts")',
+      'a:has-text("Drafts")',
+    ]);
+    if (draftsTab) {
+      await draftsTab.click().catch(() => {});
+      await page.waitForTimeout(2500);
     }
-    return out;
+    return await page.evaluate(() => {
+      const vis = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+      };
+      const seen = new Set<string>();
+      const out: { url: string; title: string }[] = [];
+      for (const a of [...document.querySelectorAll('a[href*="/items/"][href*="/edit"]')].filter(vis)) {
+        const href = a.getAttribute("href") || "";
+        const id = href.match(/\/items\/(\d+)/)?.[1];
+        const title = (a.getAttribute("title") || a.textContent || "").trim().replace(/\s+/g, " ").slice(0, 80);
+        if (!id || seen.has(id) || /^(finish editing|sell now)$/i.test(title)) continue;
+        seen.add(id);
+        out.push({ url: location.origin + href, title: title || "(untitled draft)" });
+      }
+      return out;
+    });
+  }
+
+  /**
+   * The signed-in member's profile path (/member/<id>). The id is in the session
+   * cookie `v_uid` — far more robust than scraping the header menu, whose dropdown
+   * loads lazily and often isn't open when we look. (`last_user_id` is just a
+   * counter, e.g. "1", so we guard on a realistic id length.)
+   */
+  private async memberProfileHref(page: Page): Promise<string | null> {
+    const cookies = await this.vintedCookies();
+    const idCookie =
+      cookies.find((c) => /^v_uid$/i.test(c.name) && /^\d{5,}$/.test(c.value)) ||
+      cookies.find((c) => /^last_user_id$/i.test(c.name) && /^\d{5,}$/.test(c.value));
+    if (idCookie) return `/member/${idCookie.value}`;
+    // Fallback: scrape the user menu on the home page.
+    await this.navigate(page, URLS.home);
+    await this.dismissCookieBanner(page);
+    const menu = page.locator('[data-testid="user-menu-button"]').first();
+    await menu.waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+    await menu.click().catch(() => {});
+    await page.waitForTimeout(1200);
+    const href = await page.evaluate(() => {
+      const a = [...document.querySelectorAll("a[href]")].find((el) => /^\/member\/\d+(\?|$)/.test(el.getAttribute("href") || ""));
+      return a ? a.getAttribute("href") : null;
+    });
+    return href ? href.replace(/\?.*$/, "") : null;
   }
 }

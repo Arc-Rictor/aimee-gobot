@@ -27,11 +27,14 @@ bun run vinted:mcp                   # MCP server (stdio)
 ## Where we are
 
 The connector, MCP server, batch CLI, and phone photo-upload server are all built
-and pushed. **Login now works and the session is valid** (`vinted:list check` →
-`✅ Session valid`). The real blocker turned out NOT to be a stale browser process
-(see saga #6) but a **bun ↔ Playwright incompatibility** — now fixed by running the
-browser commands under Node. Drafting/listing has **not been tested against live
-Vinted yet** — that is the current step.
+and pushed. **Login works AND the full draft flow works end-to-end against live
+Vinted** (verified). The real login blocker turned out NOT to be a stale browser
+process (see saga #6) but a **bun ↔ Playwright incompatibility** — fixed by running
+the browser commands under Node. Then the form selectors were tuned against the
+live "Sell an item" page (saga #8): `vinted:list draft` now fills every field,
+**actually saves the draft** (confirmed via the HTTP 200 draft API), and
+`vinted:list drafts` lists it. Next is conversational use via the MCP server and
+real listings.
 
 ### The login saga so far (so you don't repeat fixes)
 Symptoms seen, in order, and what was done:
@@ -62,13 +65,33 @@ Symptoms seen, in order, and what was done:
    Node must be installed + on PATH (here: portable Node 24 at
    `C:\Users\vanil\nodejs\...`, added to the user PATH). See CLAUDE.md "Runtime"
    and docs/vinted.md §9.
+8. **Draft form tuned to the live page.** Selectors in `selectors.ts` were rebuilt
+   against the real "Sell an item" form (see docs/vinted.md §6). Gotchas for future
+   breakage: category is a search box (`#catalog-search-input`) → click the result
+   row matching the full path; attribute fields (brand/size/condition/colour/
+   material) only render AFTER a category is chosen; brand search results are
+   `role="button"` rows with NO per-option testid (scope to
+   `brand-select-dropdown-content`); the brand dropdown ignores Escape (close it
+   with a click-outside in the page margin); package size is three cells, not a
+   dropdown. Drafts save via `POST /api/v2/item_upload/drafts` — the connector
+   checks that response, so a rejected draft (e.g. a symbol-heavy title → HTTP 400
+   "too many symbol characters") is reported, not silently swallowed. Drafts live
+   on the member profile (`/member/<v_uid cookie>`) under the Drafts filter.
 
 ### Immediate next step
-Login is done. Current step is **testing a real draft** (see roadmap §1 below) and
-**tuning `selectors.ts`** against the live Vinted UK form. Never auto-publish.
+Login + draft creation are done and verified. Next:
+1. **Wire up the MCP server** for conversational listing (drop photos → Claude
+   writes the listing → `vinted_create_draft`). See `mcp-servers/vinted/README.md`.
+2. **List real items** — calibration used a placeholder image; swap in real photos.
+3. The publish flow (`vinted:list publish <url>`) is built but untested. Never
+   auto-publish — it's human-approved only.
 
-Prereq on a fresh machine: Node must be on PATH (see saga #7). On this laptop it
-already is. Sanity check anytime: `bun run vinted:list check` → `✅ Session valid`.
+Prereq on a fresh machine: Node must be on PATH (saga #7). On this laptop it already
+is. Sanity checks: `bun run vinted:list check` → `✅ Session valid`;
+`bun run vinted:list drafts` lists saved drafts.
+
+Two throwaway test drafts are on the account from calibration — delete them in the
+Vinted app/site (Profile → Drafts) when convenient.
 
 ## After login works — the roadmap
 1. **Test a real draft.** Put photos in `listings/<item>/` (or use

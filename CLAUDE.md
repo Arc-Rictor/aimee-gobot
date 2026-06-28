@@ -23,10 +23,16 @@ before it's published.
 When asked to list an item, you (Claude) do the cataloguing:
 - View the photos and identify the item, brand, and any flaws.
 - Write a searchable `title` and an honest `description` (mention defects).
-- Choose the `category` path, `condition` (one of the five Vinted labels),
-  `colors`, `size`, and a sensible **GBP** `price` (research comparables if asked).
+  **Keep the title free of em-dashes (—), slashes and symbol runs** — Vinted
+  rejects symbol-heavy titles ("too many symbol characters") and the draft save
+  silently fails. Prefer plain words: "Nike Air Max 90 Trainers UK 9 White Grey".
+- Choose the `category` path (broad→specific, e.g. `["Men","Shoes","Trainers"]`),
+  `condition` (one of the five Vinted labels), `colors`, `size` (as Vinted lists
+  it for the category), and a sensible **GBP** `price` (research comparables if asked).
 - Call `vinted_create_draft` with either explicit `photos` paths or a `photoDir`
-  folder. Report the per-field result + screenshot for the user to approve.
+  folder. Report the per-field result + screenshot for the user to approve. The
+  connector verifies the real save (HTTP 200) — if `saveDraft` reports failed, fix
+  the flagged field (often the title) and retry.
 
 The `Listing` schema is the contract: `mcp-servers/vinted/types.ts`.
 

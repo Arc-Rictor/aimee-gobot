@@ -167,6 +167,7 @@ The `Listing` object Claude fills ([`types.ts`](../mcp-servers/vinted/types.ts))
 | Browser command hangs on launch (no window, no output, times out) | You don't have Node, or a script was switched back to `bun run`. Playwright can't drive a browser under bun (§9). Install Node, reopen the terminal; keep `vinted:list`/`vinted:mcp` on `tsx`. |
 | `'node' is not recognized` / `tsx: command not found` | Install Node LTS and reopen the terminal so it's on PATH (§9). |
 | Captcha / "unusual activity" | run `VINTED_HEADED=1`, solve by hand once; slow down bulk runs |
+| `saveDraft` reports failed / "too many symbol characters" | Vinted rejected the title — remove em-dashes (—), slashes and symbol runs, then retry. The connector checks the real save (HTTP 200), so this is surfaced, not hidden. |
 | A field reports `failed` | tune `selectors.ts` (§6) |
 | Chromium won't launch | `bun run vinted:setup`, or set `VINTED_CHROMIUM_PATH` |
 | Session keeps dropping | don't copy the profile between machines; log in per machine |

@@ -33,7 +33,12 @@ export const ListingSchema = z.object({
    */
   photos: z.array(z.string().min(1)).min(1).max(20),
 
-  /** Listing title, e.g. "Nike Air Max 90 — UK 9 — White/Grey". Keep it searchable. */
+  /**
+   * Listing title, e.g. "Nike Air Max 90 Trainers UK 9 White Grey". Keep it
+   * searchable, and avoid em-dashes (—), slashes and other symbol runs: Vinted
+   * rejects symbol-heavy titles server-side ("Title contains too many symbol
+   * characters") and the draft won't save.
+   */
   title: z.string().min(3).max(100),
 
   /** Full description. Mention flaws honestly — it reduces returns/disputes. */
