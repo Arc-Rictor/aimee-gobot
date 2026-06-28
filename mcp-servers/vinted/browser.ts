@@ -73,27 +73,39 @@ export async function launchContext(
   const executablePath = resolveChromium();
   const headless = !opts.headed;
 
-  const context = await chromium.launchPersistentContext(profileDir(), {
-    headless,
-    executablePath,
-    locale: opts.locale || "en-GB",
-    timezoneId: opts.timezone || "Europe/London",
-    viewport: { width: 1280, height: 900 },
-    // Use the browser's own user-agent by default. Overriding it with a mismatched
-    // string can make Vinted/Cloudflare hang or block; only set it if you know
-    // you need to (VINTED_USER_AGENT).
-    ...(process.env.VINTED_USER_AGENT ? { userAgent: process.env.VINTED_USER_AGENT } : {}),
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      // Quiet down Chrome's own stderr noise (USB / GCM / GPU spam) so our
-      // [vinted] log lines are readable in the terminal.
-      "--log-level=3",
-      "--disable-logging",
-      "--disable-gpu",
-      "--disable-features=Translate,OptimizationHints",
-      "--password-store=basic",
-    ],
-  });
+  let context: BrowserContext;
+  try {
+    context = await chromium.launchPersistentContext(profileDir(), {
+      headless,
+      executablePath,
+      // Fail (rather than hang forever) if the browser can't start within 45s.
+      timeout: 45_000,
+      locale: opts.locale || "en-GB",
+      timezoneId: opts.timezone || "Europe/London",
+      viewport: { width: 1280, height: 900 },
+      // Use the browser's own user-agent by default. Overriding it with a mismatched
+      // string can make Vinted/Cloudflare hang or block; only set it if you know
+      // you need to (VINTED_USER_AGENT).
+      ...(process.env.VINTED_USER_AGENT ? { userAgent: process.env.VINTED_USER_AGENT } : {}),
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        // Quiet down Chrome's own stderr noise (USB / GCM / GPU spam) so our
+        // [vinted] log lines are readable in the terminal.
+        "--log-level=3",
+        "--disable-logging",
+        "--disable-gpu",
+        "--disable-features=Translate,OptimizationHints",
+        "--password-store=basic",
+      ],
+    });
+  } catch (e) {
+    throw new Error(
+      "Couldn't start the browser. The most common cause is a leftover 'Chrome for " +
+        "Testing' process still holding the profile. Close ALL Chrome for Testing windows, " +
+        "end any 'Chrome for Testing' tasks in Task Manager, then try again.\n" +
+        `(If it persists, run: bun run vinted:setup. Original error: ${String(e).split("\n")[0]})`
+    );
+  }
 
   context.setDefaultTimeout(45_000);
   return context;
