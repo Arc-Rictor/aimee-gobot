@@ -65,3 +65,19 @@ It runs on the user's own laptop (Windows is their target), not on a server —
 datacenter IPs trip Vinted's anti-bot far more, and login/captcha need a display.
 All config is optional env vars (see `.env.example`). No database, no keys
 required. Full docs: `docs/vinted.md`.
+
+## Runtime: browser commands run under Node, not bun
+
+**Playwright cannot drive a browser under bun** — bun doesn't wire the extra
+stdio file descriptors Playwright's `--remote-debugging-pipe` transport needs, so
+`launchPersistentContext` hangs forever (and `connectOverCDP` over WebSocket hangs
+too). Verified: the browser launches fine, raw CDP works, but Playwright's own
+connection layer never connects under bun. The same call succeeds in <1s under Node.
+
+So the two browser-driving scripts run under Node via `tsx`:
+`vinted:list` and `vinted:mcp` are defined as `tsx …` in `package.json` (everything
+else stays on bun). `bun run vinted:list …` still works — bun just shells out to
+`tsx`, which runs under Node. **Node must be installed and on PATH** for this to
+work (tsx's launcher invokes `node`). If a browser command errors with
+`'node' is not recognized` or `tsx: command not found`, install Node LTS and reopen
+the terminal. Don't switch these scripts back to `bun run` — it will hang on launch.

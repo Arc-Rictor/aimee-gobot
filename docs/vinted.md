@@ -164,8 +164,27 @@ The `Listing` object Claude fills ([`types.ts`](../mcp-servers/vinted/types.ts))
 | Symptom | Fix |
 |---------|-----|
 | "Not logged in" on draft | `bun run vinted:list login` (headed, finish within the window) |
+| Browser command hangs on launch (no window, no output, times out) | You don't have Node, or a script was switched back to `bun run`. Playwright can't drive a browser under bun (§9). Install Node, reopen the terminal; keep `vinted:list`/`vinted:mcp` on `tsx`. |
+| `'node' is not recognized` / `tsx: command not found` | Install Node LTS and reopen the terminal so it's on PATH (§9). |
 | Captcha / "unusual activity" | run `VINTED_HEADED=1`, solve by hand once; slow down bulk runs |
 | A field reports `failed` | tune `selectors.ts` (§6) |
 | Chromium won't launch | `bun run vinted:setup`, or set `VINTED_CHROMIUM_PATH` |
 | Session keeps dropping | don't copy the profile between machines; log in per machine |
 | Want to see what it's doing | `VINTED_HEADED=1` |
+
+## 9. Runtime: Node is required for the browser commands
+
+The browser-driving commands (`vinted:list`, `vinted:mcp`) run under **Node**, not
+bun. Playwright can't control a browser under bun — bun doesn't pass through the
+extra stdio pipe (`--remote-debugging-pipe`) Playwright uses, so the launch hangs
+forever even though the browser itself starts fine. Under Node the same call
+connects in well under a second.
+
+So those two `package.json` scripts are defined as `tsx …`. You still type
+`bun run vinted:list …` exactly as documented — bun just shells out to `tsx`, which
+runs under Node. The rest (`vinted:setup`, `vinted:upload`) stays on bun.
+
+**Setup adds one step:** install Node LTS (e.g. `winget install OpenJS.NodeJS.LTS`,
+or unzip the official Windows build into a folder and add it to your PATH), then
+`bun add -d tsx` (already in `devDependencies` here). Reopen the terminal so Node is
+on PATH. That's the only change from a pure-bun setup.

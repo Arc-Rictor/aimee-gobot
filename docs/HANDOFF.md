@@ -27,9 +27,11 @@ bun run vinted:mcp                   # MCP server (stdio)
 ## Where we are
 
 The connector, MCP server, batch CLI, and phone photo-upload server are all built
-and pushed. We are **mid-debugging the one-time Vinted login on the laptop.**
-Drafting/listing has **not been tested against live Vinted yet** — that's next
-after login works.
+and pushed. **Login now works and the session is valid** (`vinted:list check` →
+`✅ Session valid`). The real blocker turned out NOT to be a stale browser process
+(see saga #6) but a **bun ↔ Playwright incompatibility** — now fixed by running the
+browser commands under Node. Drafting/listing has **not been tested against live
+Vinted yet** — that is the current step.
 
 ### The login saga so far (so you don't repeat fixes)
 Symptoms seen, in order, and what was done:
@@ -45,22 +47,28 @@ Symptoms seen, in order, and what was done:
    mismatch is visible.
 5. User confirmed the browser that opens is **"Chrome for Testing"** — that is
    correct (it's Playwright's bundled Chromium, not their normal Chrome).
-6. **Current blocker:** `doctor` hangs at "Launching headless browser…". Diagnosis:
-   a **stale "Chrome for Testing" process holds the persistent profile**
-   (`C:\Users\vanil\.gobot\vinted-profile`), so the next launch waits forever.
-   Added a 45s launch timeout + a clear error (`browser.ts`). Only one process can
-   use the profile at a time.
+6. We *thought* `doctor` hung because a **stale "Chrome for Testing" process held
+   the profile**, and added a 45s launch timeout + error (`browser.ts`). That was a
+   red herring — there was no stale process.
+7. **Actual root cause (resolved):** Playwright cannot drive a browser **under
+   bun**. Bun doesn't pass through the extra stdio pipe fds Playwright's
+   `--remote-debugging-pipe` transport needs, so `launchPersistentContext` hangs
+   until timeout (and `connectOverCDP` over WebSocket hangs too). Proven: the
+   browser launches fine, loopback HTTP + raw CDP round-trips work under bun, but
+   Playwright's own connection layer never connects. The identical call succeeds in
+   <1s under **Node**. **Fix:** the two browser-driving scripts (`vinted:list`,
+   `vinted:mcp`) now run under Node via `tsx` in `package.json`; everything else
+   stays on bun. `bun run vinted:list …` still works (bun shells out to `tsx`).
+   Node must be installed + on PATH (here: portable Node 24 at
+   `C:\Users\vanil\nodejs\...`, added to the user PATH). See CLAUDE.md "Runtime"
+   and docs/vinted.md §9.
 
-### Immediate next step for the user
-1. Close ALL "Chrome for Testing" windows; end any "Chrome for Testing" tasks in
-   Task Manager (leave normal Chrome alone).
-2. `git pull` then `bun run vinted:list doctor` — expect a clean block ending with
-   `Reached URL: https://www.vinted.co.uk/` and an auth-cookie line.
-3. `bun run vinted:list login`, logging in **inside the Chrome for Testing window**.
-   Watch for `✅ Login detected — session saved`, then `bun run vinted:list check`.
+### Immediate next step
+Login is done. Current step is **testing a real draft** (see roadmap §1 below) and
+**tuning `selectors.ts`** against the live Vinted UK form. Never auto-publish.
 
-Golden rule for the user: let `login` finish (or close its window) before running
-another command, so the profile isn't locked.
+Prereq on a fresh machine: Node must be on PATH (see saga #7). On this laptop it
+already is. Sanity check anytime: `bun run vinted:list check` → `✅ Session valid`.
 
 ## After login works — the roadmap
 1. **Test a real draft.** Put photos in `listings/<item>/` (or use

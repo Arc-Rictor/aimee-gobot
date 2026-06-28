@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "vinted:setup": "bun run setup/vinted-setup.ts",
-    "vinted:list": "bun run scripts/vinted-list.ts",
+    "vinted:list": "tsx scripts/vinted-list.ts",
     "vinted:upload": "bun run scripts/vinted-upload-server.ts",
-    "vinted:mcp": "bun run mcp-servers/vinted/server.ts",
+    "vinted:mcp": "tsx mcp-servers/vinted/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,10 +17,12 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.0"
   },
   "engines": {
-    "bun": ">=1.0.0"
+    "bun": ">=1.0.0",
+    "node": ">=18.0.0"
   },
   "license": "MIT"
 }
