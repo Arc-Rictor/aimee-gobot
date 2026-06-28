@@ -15,7 +15,7 @@ import { join } from "path";
 import type { BrowserContext, Page, Locator } from "playwright";
 import { launchContext, resolveChromium, profileDir, VINTED_BASE } from "./browser.js";
 import { URLS, LOGGED_IN_SIGNALS, FORM, CATEGORY, PICKERS, PACKAGE, ACTIONS } from "./selectors.js";
-import type { Listing, DraftResult, FieldResult } from "./types.js";
+import type { Listing, DraftResult, FieldResult, ResearchResult, PriceComparable } from "./types.js";
 
 const DEBUG = process.env.VINTED_DEBUG === "1";
 
@@ -770,5 +770,112 @@ export class VintedClient {
       return a ? a.getAttribute("href") : null;
     });
     return href ? href.replace(/\?.*$/, "") : null;
+  }
+
+  // ── price research ─────────────────────────────────────────────────────────
+
+  /**
+   * Research a sensible price from comparable *active* Vinted listings. Searches
+   * the catalog for `query`, reads each result card's base listing price plus its
+   * brand/condition/size (from the card's accessible label), optionally narrows to
+   * matching size/condition, and returns a price distribution + suggestion bands.
+   * These are asking prices (not sold), so they skew a little high.
+   */
+  async researchPrice(
+    query: string,
+    opts: { size?: string; condition?: string; max?: number } = {}
+  ): Promise<ResearchResult> {
+    const page = await this.page();
+    const searchUrl = `${VINTED_BASE}/catalog?search_text=${encodeURIComponent(query)}&order=relevance`;
+    await this.navigate(page, searchUrl);
+    await this.dismissCookieBanner(page);
+    await page
+      .waitForSelector('a[data-testid$="--overlay-link"], a[href*="/items/"]', { state: "visible", timeout: 20000 })
+      .catch(() => {});
+    await page.waitForTimeout(2500);
+
+    const cap = Math.min(Math.max(opts.max ?? 40, 1), 80);
+    const all: PriceComparable[] = await page.evaluate((limit) => {
+      const vis = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        const s = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+      };
+      const links = [...document.querySelectorAll('a[data-testid$="--overlay-link"], a[href*="/items/"]')].filter(vis);
+      const seen = new Set<string>();
+      const out: PriceComparable[] = [];
+      for (const a of links) {
+        const href = a.getAttribute("href") || "";
+        const id = href.match(/\/items\/(\d+)/)?.[1];
+        if (!id || seen.has(id)) continue;
+        let card: Element = a;
+        for (let i = 0; i < 5 && card.parentElement; i++) {
+          card = card.parentElement;
+          if (/£/.test(card.textContent || "")) break;
+        }
+        const priceEl = card.querySelector('[data-testid$="--price-text"]');
+        const m = (priceEl?.textContent || "").match(/£\s*(\d+(?:\.\d{1,2})?)/);
+        if (!m) continue;
+        const price = parseFloat(m[1]);
+        if (!isFinite(price) || price <= 0) continue;
+        seen.add(id);
+        const aria = a.getAttribute("title") || a.getAttribute("aria-label") || "";
+        const field = (name: string) => {
+          const mm = aria.match(new RegExp(name + ":\\s*([^,]+)", "i"));
+          return mm ? mm[1].trim() : undefined;
+        };
+        const title = (aria.split(/,\s*brand:/i)[0] || aria).trim().slice(0, 80);
+        out.push({ title, brand: field("brand"), condition: field("condition"), size: field("size"), price, url: location.origin + href });
+        if (out.length >= limit) break;
+      }
+      return out;
+    }, cap);
+
+    // Optionally narrow to comparables matching the item's size / condition.
+    const norm = (s?: string) => (s || "").trim().toLowerCase();
+    let used = all;
+    const filteredBy: { size?: string; condition?: string } = {};
+    if (opts.condition) {
+      const c = norm(opts.condition);
+      const sub = all.filter((x) => norm(x.condition) === c);
+      if (sub.length >= 3) {
+        used = sub;
+        filteredBy.condition = opts.condition;
+      }
+    }
+    if (opts.size) {
+      const sz = norm(opts.size).replace(/^(uk|eu|us)\s*/i, "");
+      const sub = used.filter((x) => {
+        const v = norm(x.size);
+        return v === sz || v === norm(opts.size) || v.endsWith(" " + sz);
+      });
+      if (sub.length >= 3) {
+        used = sub;
+        filteredBy.size = opts.size;
+      }
+    }
+
+    const prices = used.map((x) => x.price).sort((a, b) => a - b);
+    const pct = (p: number) => (prices.length ? prices[Math.min(prices.length - 1, Math.round(p * (prices.length - 1)))] : 0);
+    const stats = prices.length
+      ? { min: prices[0], p25: pct(0.25), median: pct(0.5), p75: pct(0.75), max: prices[prices.length - 1] }
+      : null;
+    const round = (n: number) => Math.max(1, Math.round(n));
+    const suggestion = stats ? { quickSale: round(stats.p25), market: round(stats.median), topEnd: round(stats.p75) } : null;
+
+    return {
+      query,
+      url: searchUrl,
+      sampled: all.length,
+      used: used.length,
+      filteredBy: Object.keys(filteredBy).length ? filteredBy : undefined,
+      stats,
+      suggestion,
+      comparables: used.slice(0, 12),
+      note: stats
+        ? "Prices are ACTIVE asking prices (not sold), so they skew high — for a quick sale aim near 'quickSale'." +
+          ` Based on ${used.length} comparable(s).`
+        : "No comparable listings found — broaden the query.",
+    };
   }
 }

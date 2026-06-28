@@ -31,38 +31,39 @@ Add this MCP server to your Claude config, then just talk to Claude:
 *"List the trainers in `./listings/example-trainers` — look at the photos,
 write the listing and save a draft."*
 
+> **The MCP server must run under Node, not bun** — Playwright can't drive a
+> browser under bun (see [`docs/vinted.md`](../../docs/vinted.md) §9). So the
+> `command` below points at `node.exe` running the project's bundled `tsx` (which
+> runs the TypeScript server with no build step). Using `bun` here will hang.
+
 **Claude Desktop (Windows)** — edit
-`%APPDATA%\Claude\claude_desktop_config.json` (use the full path to `bun.exe`
-and double-backslashes):
+`%APPDATA%\Claude\claude_desktop_config.json` (absolute paths, double-backslashes):
 
 ```json
 {
   "mcpServers": {
     "vinted-uk": {
-      "command": "C:\\Users\\YOU\\.bun\\bin\\bun.exe",
-      "args": ["run", "C:\\Users\\YOU\\aimee-gobot\\mcp-servers\\vinted\\server.ts"]
+      "command": "C:\\Users\\YOU\\nodejs\\node-vXX-win-x64\\node.exe",
+      "args": [
+        "C:\\Users\\YOU\\aimee-gobot\\node_modules\\tsx\\dist\\cli.mjs",
+        "C:\\Users\\YOU\\aimee-gobot\\mcp-servers\\vinted\\server.ts"
+      ],
+      "env": { "VINTED_SHOT_DIR": "C:\\Users\\YOU\\aimee-gobot\\.vinted-shots" }
     }
   }
 }
 ```
 
-**Claude Desktop (Mac) / Claude Code** — `~/.claude.json` or `.mcp.json`:
+If Node is on your PATH you can use `"command": "node"`. On Mac/Linux use forward
+slashes and your Node/project paths. For **Claude Code**, add the same server with
+`claude mcp add vinted-uk -- <node> <…/tsx/dist/cli.mjs> <…/server.ts>` or in
+`.mcp.json`.
 
-```json
-{
-  "mcpServers": {
-    "vinted-uk": {
-      "command": "bun",
-      "args": ["run", "/ABSOLUTE/PATH/TO/aimee-gobot/mcp-servers/vinted/server.ts"]
-    }
-  }
-}
-```
-
-Restart Claude Desktop after editing. Then to list an item: keep its photos in a
-folder, **attach them to the chat** so Claude can see and describe them, and say
-*"list these — photos are in `C:\Users\YOU\vinted\item1`"*. Claude composes the
-listing and calls `vinted_create_draft` with that `photoDir`.
+Restart Claude Desktop after editing. To list an item: keep its photos in a folder,
+**attach them to the chat** so Claude can see them, and say *"list these — photos
+are in `C:\Users\YOU\aimee-gobot\listings\item1`"*. Claude researches a price
+(`vinted_research_price`), composes the listing, and calls `vinted_create_draft`
+with that `photoDir`.
 
 Tools exposed:
 
@@ -70,6 +71,7 @@ Tools exposed:
 |------|------|
 | `vinted_check_session` | Is there a valid logged-in session? |
 | `vinted_login` | Open a browser to log in by hand (local, has a display) |
+| `vinted_research_price` | Suggest a GBP price from comparable active listings |
 | `vinted_create_draft` | Fill the form from photos + details, **save as draft** |
 | `vinted_list_drafts` | List current drafts + URLs for review |
 | `vinted_publish` | Publish an approved draft live |

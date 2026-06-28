@@ -134,6 +134,29 @@ async function main() {
       await client.close();
       break;
     }
+    case "research": {
+      if (!arg) throw new Error('Usage: vinted:list research "<query>" [size] [condition]');
+      const [size, condition] = process.argv.slice(4);
+      const client = new VintedClient();
+      const r = await client.researchPrice(arg, { size, condition });
+      console.log(`\n🔎 ${r.query}\n${r.url}`);
+      if (r.stats && r.suggestion) {
+        console.log(
+          `\n   ${r.used} comparable(s)${r.filteredBy ? ` (filtered: ${JSON.stringify(r.filteredBy)})` : ""}, sampled ${r.sampled}:`
+        );
+        console.log(
+          `   min £${r.stats.min} · p25 £${r.stats.p25} · median £${r.stats.median} · p75 £${r.stats.p75} · max £${r.stats.max}`
+        );
+        console.log(
+          `   suggested → quick sale £${r.suggestion.quickSale} · market £${r.suggestion.market} · top end £${r.suggestion.topEnd}`
+        );
+      }
+      console.log(`\n   ${r.note}`);
+      for (const c of r.comparables.slice(0, 8))
+        console.log(`   - £${c.price}  ${c.condition ?? "?"}  size ${c.size ?? "?"}  ${c.title}`);
+      await client.close();
+      break;
+    }
     case "publish": {
       if (!arg) throw new Error("Usage: vinted:list publish <draftUrl>");
       const client = new VintedClient({ headed });
@@ -144,7 +167,7 @@ async function main() {
     }
     default:
       console.log(
-        "Commands: login | check | doctor | cookies | draft <folder> | draft-all <dir> | drafts | publish <url>"
+        'Commands: login | check | doctor | cookies | draft <folder> | draft-all <dir> | drafts | research "<query>" [size] [condition] | publish <url>'
       );
       process.exit(1);
   }

@@ -111,3 +111,38 @@ export interface DraftResult {
   /** Human-readable summary. */
   summary: string;
 }
+
+/** One comparable listing found while researching a price. */
+export interface PriceComparable {
+  title: string;
+  brand?: string;
+  condition?: string;
+  size?: string;
+  /** Base listing price in GBP (what the seller set — buyer protection is added on top). */
+  price: number;
+  url: string;
+}
+
+/**
+ * Result of researching a price from comparable *active* Vinted listings (asking
+ * prices, not sold prices — so they skew a little high). Claude turns this into a
+ * recommendation in conversation; the suggestion bands are a starting point.
+ */
+export interface ResearchResult {
+  query: string;
+  /** The catalog search URL used. */
+  url: string;
+  /** Total comparable cards sampled from the search. */
+  sampled: number;
+  /** How many were used for the stats (after any size/condition filter). */
+  used: number;
+  filteredBy?: { size?: string; condition?: string };
+  /** Price distribution of the used comparables (GBP), or null if none found. */
+  stats: { min: number; p25: number; median: number; p75: number; max: number } | null;
+  /** Suggested price bands derived from the distribution (GBP), or null. */
+  suggestion: { quickSale: number; market: number; topEnd: number } | null;
+  /** A sample of the comparables behind the numbers. */
+  comparables: PriceComparable[];
+  /** Human-readable caveat about what the numbers mean. */
+  note: string;
+}

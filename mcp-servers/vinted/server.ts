@@ -11,6 +11,7 @@
  * Tools:
  *   vinted_check_session  – are we logged in?
  *   vinted_login          – open a browser to log in by hand (local only)
+ *   vinted_research_price – suggest a GBP price from comparable listings
  *   vinted_create_draft   – build a draft listing from photos + details
  *   vinted_list_drafts    – list current drafts for review
  *   vinted_publish        – publish an approved draft live
@@ -69,6 +70,33 @@ server.registerTool(
         loggedIn: ok,
         message: ok ? "Login detected and saved." : "Timed out waiting for login. Try again and finish logging in within the window.",
       });
+    } finally {
+      await client.close();
+    }
+  }
+);
+
+server.registerTool(
+  "vinted_research_price",
+  {
+    title: "Research a Vinted price",
+    description:
+      "Suggest a sensible GBP price by searching comparable ACTIVE vinted.co.uk listings for a query " +
+      "(e.g. 'Nike Air Max 90 trainers UK 9'). Returns a price distribution (min/median/max), suggestion " +
+      "bands (quickSale/market/topEnd) and sample comparables. Optionally narrow by size/condition. These " +
+      "are asking prices (not sold) so they skew a little high — temper the recommendation. Call this before " +
+      "vinted_create_draft to choose the price.",
+    inputSchema: {
+      query: z.string().min(2).describe("Search query, e.g. 'Nike Air Max 90 trainers UK 9'."),
+      size: z.string().optional().describe("Optional size to narrow comparables, e.g. 'UK 9' or '9'."),
+      condition: z.string().optional().describe("Optional condition label to narrow comparables, e.g. 'Very good'."),
+    },
+  },
+  async ({ query, size, condition }) => {
+    const client = new VintedClient();
+    try {
+      const result = await client.researchPrice(query, { size, condition });
+      return text(result);
     } finally {
       await client.close();
     }

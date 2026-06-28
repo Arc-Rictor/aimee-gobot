@@ -59,6 +59,7 @@ bun run vinted:list check            # is the session valid?
 bun run vinted:list draft <folder>   # draft one item
 bun run vinted:list draft-all <dir>  # draft every subfolder
 bun run vinted:list drafts           # list current drafts
+bun run vinted:list research "<q>"   # suggest a price from comparable listings
 bun run vinted:list publish <url>    # publish an approved draft
 bun run vinted:upload                # LAN photo-upload page (snap on phone → laptop)
 bun run vinted:mcp                   # run the MCP server (stdio)
